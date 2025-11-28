@@ -12,7 +12,11 @@ on:
 
 jobs:
   build-ios:
-    runs-on: macos-latest
+    # Use Apple Silicon (M-series) macOS runner for iOS cross-compilation
+    # macos-14 and later use M1 chips which are required for arm64-simulator builds
+    runs-on: macos-14
+    permissions:
+      contents: read
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -47,6 +51,9 @@ jobs:
           echo "============================================"
           echo "Build Environment Information"
           echo "============================================"
+          echo "Machine architecture:"
+          uname -m
+          echo ""
           echo "Xcode version:"
           xcodebuild -version
           echo ""
