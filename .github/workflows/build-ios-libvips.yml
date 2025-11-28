@@ -1,0 +1,147 @@
+name: Build iOS libvips
+
+on:
+  workflow_dispatch:
+    inputs:
+      libvips_version:
+        description: 'libvips version to build'
+        required: false
+        default: 'v8.16.0'
+        type: string
+
+# This workflow simulates the iOS build process from MobiPkg/Compile
+# Build script source: https://github.com/MobiPkg/Compile/blob/main/example/libvips/build-ios-with-workspace.sh
+
+jobs:
+  build-ios:
+    runs-on: macos-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Xcode
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest-stable
+
+      - name: Install build dependencies
+        run: |
+          # Install required build tools
+          # These are the dependencies required by MobiPkg/Compile build scripts
+          brew install meson ninja automake autoconf libtool pkg-config nasm cmake
+
+      - name: Setup Dart SDK
+        uses: dart-lang/setup-dart@v1
+        with:
+          sdk: stable
+
+      - name: Clone MobiPkg/Compile
+        run: |
+          git clone --depth 1 https://github.com/MobiPkg/Compile.git /tmp/Compile
+
+      - name: Install Dart dependencies
+        run: |
+          cd /tmp/Compile
+          dart pub get
+
+      - name: Display build information
+        run: |
+          echo "============================================"
+          echo "Build Environment Information"
+          echo "============================================"
+          echo "Xcode version:"
+          xcodebuild -version
+          echo ""
+          echo "macOS version:"
+          sw_vers
+          echo ""
+          echo "Build tools:"
+          meson --version
+          ninja --version
+          cmake --version
+          echo ""
+          echo "Dart version:"
+          dart --version
+          echo ""
+          echo "libvips version to build: ${{ inputs.libvips_version || 'v8.16.0' }}"
+          echo "============================================"
+
+      - name: Run iOS build with workspace
+        run: |
+          cd /tmp/Compile
+          
+          # Set up directories
+          INSTALL_PREFIX="/tmp/Compile/example/libvips/install"
+          OUTPUT_DIR="/tmp/Compile/example/libvips/output"
+          mkdir -p "$INSTALL_PREFIX"
+          mkdir -p "$OUTPUT_DIR"
+          
+          echo "============================================"
+          echo "Starting libvips iOS build using workspace"
+          echo "Install prefix: $INSTALL_PREFIX"
+          echo "Output directory: $OUTPUT_DIR"
+          echo "============================================"
+          
+          # Run the workspace build command
+          # This compiles all dependencies defined in workspace.yaml:
+          # - zlib
+          # - libffi
+          # - pcre2
+          # - expat
+          # - glib
+          # - libjpeg-turbo
+          # - libpng
+          # - libwebp
+          # - libvips
+          dart run bin/compile.dart workspace -C example/libvips \
+            --ios --no-android \
+            --install-prefix "$INSTALL_PREFIX" \
+            --dependency-prefix "$INSTALL_PREFIX" \
+            --target libvips
+
+      - name: Create XCFramework
+        run: |
+          cd /tmp/Compile
+          
+          INSTALL_PREFIX="/tmp/Compile/example/libvips/install"
+          
+          # Create XCFramework using the package command
+          dart run bin/compile.dart package xcframework -C example/libvips \
+            -p "$INSTALL_PREFIX" \
+            -t libvips \
+            -o libvips
+
+      - name: Display build output
+        run: |
+          echo "============================================"
+          echo "Build Output"
+          echo "============================================"
+          
+          if [ -d "/tmp/Compile/example/libvips/output" ]; then
+            echo "Output directory contents:"
+            ls -la /tmp/Compile/example/libvips/output/
+            
+            if [ -d "/tmp/Compile/example/libvips/output/libvips.xcframework" ]; then
+              echo ""
+              echo "XCFramework structure:"
+              find /tmp/Compile/example/libvips/output/libvips.xcframework -type f -name "*.a" | head -20
+            fi
+          else
+            echo "Output directory not found"
+          fi
+          
+          echo ""
+          echo "Install directory structure:"
+          if [ -d "/tmp/Compile/example/libvips/install" ]; then
+            ls -la /tmp/Compile/example/libvips/install/
+          else
+            echo "Install directory not found"
+          fi
+
+      - name: Upload XCFramework artifact
+        uses: actions/upload-artifact@v4
+        if: success()
+        with:
+          name: libvips-ios-xcframework
+          path: /tmp/Compile/example/libvips/output/
+          retention-days: 7
