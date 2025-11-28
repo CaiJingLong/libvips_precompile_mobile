@@ -1,4 +1,43 @@
-# Build for android libvips
+# Build libvips for Mobile Platforms
+
+This repository contains precompiled libvips libraries for mobile platforms.
+
+## iOS Build (libvips-8.16.0-ios)
+
+The iOS build of libvips-8.16.0 is compiled using the build scripts from the [MobiPkg/Compile](https://github.com/MobiPkg/Compile) repository.
+
+### Build Script Source
+
+The iOS compilation is based on:
+- **Repository**: [MobiPkg/Compile](https://github.com/MobiPkg/Compile)
+- **Build Script**: [build-ios-with-workspace.sh](https://github.com/MobiPkg/Compile/blob/main/example/libvips/build-ios-with-workspace.sh)
+
+The build script uses the Dart-based Compile tool to orchestrate the compilation of libvips and its dependencies for iOS platforms.
+
+### Dependencies Compiled
+
+The iOS build includes the following dependencies (as defined in [workspace.yaml](https://github.com/MobiPkg/Compile/blob/main/example/libvips/workspace.yaml)):
+
+| Library | Description |
+|---------|-------------|
+| zlib | Compression library |
+| libffi | Foreign function interface library |
+| pcre2 | Perl Compatible Regular Expressions |
+| expat | XML parser library |
+| glib | Core application building blocks |
+| libjpeg-turbo | JPEG image codec |
+| libpng | PNG image codec |
+| libwebp | WebP image codec |
+| libvips | Image processing library |
+
+### Supported Architectures
+
+- `arm64` - iOS devices (iPhone/iPad)
+- `arm64-simulator` - iOS Simulator on Apple Silicon Macs
+
+---
+
+## Android Build (libvips)
 
 This packaging script is only tested in the following environments:
 
