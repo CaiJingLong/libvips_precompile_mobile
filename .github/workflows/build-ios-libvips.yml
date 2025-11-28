@@ -2,15 +2,13 @@ name: Build iOS libvips
 
 on:
   workflow_dispatch:
-    inputs:
-      libvips_version:
-        description: 'libvips version to build'
-        required: false
-        default: 'v8.16.0'
-        type: string
 
 # This workflow simulates the iOS build process from MobiPkg/Compile
 # Build script source: https://github.com/MobiPkg/Compile/blob/main/example/libvips/build-ios-with-workspace.sh
+#
+# Note: The libvips version is defined in the MobiPkg/Compile repository's
+# example/libvips/libvips/lib.yaml file. To build a different version,
+# you would need to modify that file in the cloned repository.
 
 jobs:
   build-ios:
@@ -62,24 +60,19 @@ jobs:
           echo ""
           echo "Dart version:"
           dart --version
-          echo ""
-          echo "libvips version to build: ${{ inputs.libvips_version || 'v8.16.0' }}"
           echo "============================================"
 
       - name: Run iOS build with workspace
         run: |
           cd /tmp/Compile
           
-          # Set up directories
+          # Set up install directory
           INSTALL_PREFIX="/tmp/Compile/example/libvips/install"
-          OUTPUT_DIR="/tmp/Compile/example/libvips/output"
           mkdir -p "$INSTALL_PREFIX"
-          mkdir -p "$OUTPUT_DIR"
           
           echo "============================================"
           echo "Starting libvips iOS build using workspace"
           echo "Install prefix: $INSTALL_PREFIX"
-          echo "Output directory: $OUTPUT_DIR"
           echo "============================================"
           
           # Run the workspace build command
