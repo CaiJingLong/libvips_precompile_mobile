@@ -3,7 +3,7 @@ name: Build iOS libvips
 on:
   workflow_dispatch:
 
-# This workflow simulates the iOS build process from MobiPkg/Compile
+# This workflow builds libvips for iOS using MobiPkg/Compile
 # Build script source: https://github.com/MobiPkg/Compile/blob/main/example/libvips/build-ios-with-workspace.sh
 #
 # Note: The libvips version is defined in the MobiPkg/Compile repository's
@@ -16,10 +16,28 @@ jobs:
     # macos-14 and later use M1 chips which are required for arm64-simulator builds
     runs-on: macos-14
     permissions:
-      contents: read
+      contents: write
+    outputs:
+      build_date: ${{ steps.build-info.outputs.build_date }}
+      build_tag: ${{ steps.build-info.outputs.build_tag }}
+      mobipkg_ref: ${{ steps.clone-mobipkg.outputs.mobipkg_ref }}
+      mobipkg_commit: ${{ steps.clone-mobipkg.outputs.mobipkg_commit }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+
+      - name: Generate build information
+        id: build-info
+        run: |
+          BUILD_DATE=$(date -u +"%Y-%m-%d")
+          BUILD_TAG="ios-${BUILD_DATE}-${{ github.run_number }}"
+          BUILD_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+          echo "build_date=${BUILD_DATE}" >> $GITHUB_OUTPUT
+          echo "build_tag=${BUILD_TAG}" >> $GITHUB_OUTPUT
+          echo "build_time=${BUILD_TIME}" >> $GITHUB_OUTPUT
+          echo "Build Date: ${BUILD_DATE}"
+          echo "Build Tag: ${BUILD_TAG}"
+          echo "Build Time: ${BUILD_TIME}"
 
       - name: Setup Xcode
         uses: maxim-lobanov/setup-xcode@v1
@@ -27,10 +45,14 @@ jobs:
           xcode-version: latest-stable
 
       - name: Install build dependencies
+        id: install-deps
         run: |
           # Install required build tools
           # These are the dependencies required by MobiPkg/Compile build scripts
           brew install meson ninja automake autoconf libtool pkg-config nasm cmake
+          
+          # Record installed versions
+          echo "brew_packages=meson ninja automake autoconf libtool pkg-config nasm cmake" >> $GITHUB_OUTPUT
 
       - name: Setup Dart SDK
         uses: dart-lang/setup-dart@v1
@@ -38,36 +60,76 @@ jobs:
           sdk: stable
 
       - name: Clone MobiPkg/Compile
+        id: clone-mobipkg
         run: |
-          git clone --depth 1 https://github.com/MobiPkg/Compile.git /tmp/Compile
+          # Clone with full history to get the exact ref
+          git clone https://github.com/MobiPkg/Compile.git /tmp/Compile
+          cd /tmp/Compile
+          
+          # Get the current commit SHA and ref
+          MOBIPKG_COMMIT=$(git rev-parse HEAD)
+          MOBIPKG_SHORT_COMMIT=$(git rev-parse --short HEAD)
+          MOBIPKG_REF="main"
+          
+          echo "mobipkg_ref=${MOBIPKG_REF}" >> $GITHUB_OUTPUT
+          echo "mobipkg_commit=${MOBIPKG_COMMIT}" >> $GITHUB_OUTPUT
+          echo "mobipkg_short_commit=${MOBIPKG_SHORT_COMMIT}" >> $GITHUB_OUTPUT
+          
+          echo "MobiPkg/Compile ref: ${MOBIPKG_REF}"
+          echo "MobiPkg/Compile commit: ${MOBIPKG_COMMIT}"
 
       - name: Install Dart dependencies
         run: |
           cd /tmp/Compile
           dart pub get
 
-      - name: Display build information
+      - name: Collect build environment information
+        id: env-info
         run: |
-          echo "============================================"
-          echo "Build Environment Information"
-          echo "============================================"
-          echo "Machine architecture:"
-          uname -m
-          echo ""
-          echo "Xcode version:"
-          xcodebuild -version
-          echo ""
-          echo "macOS version:"
-          sw_vers
-          echo ""
-          echo "Build tools:"
-          meson --version
-          ninja --version
-          cmake --version
-          echo ""
-          echo "Dart version:"
-          dart --version
-          echo "============================================"
+          # Create environment info file
+          ENV_FILE="/tmp/build-environment.txt"
+          
+          echo "============================================" | tee $ENV_FILE
+          echo "Build Environment Information" | tee -a $ENV_FILE
+          echo "============================================" | tee -a $ENV_FILE
+          echo "" | tee -a $ENV_FILE
+          
+          echo "## System Information" | tee -a $ENV_FILE
+          echo "Machine architecture: $(uname -m)" | tee -a $ENV_FILE
+          echo "Kernel: $(uname -sr)" | tee -a $ENV_FILE
+          echo "" | tee -a $ENV_FILE
+          
+          echo "## macOS Version" | tee -a $ENV_FILE
+          sw_vers | tee -a $ENV_FILE
+          echo "" | tee -a $ENV_FILE
+          
+          echo "## Xcode Version" | tee -a $ENV_FILE
+          xcodebuild -version | tee -a $ENV_FILE
+          echo "" | tee -a $ENV_FILE
+          
+          echo "## Build Tools Versions" | tee -a $ENV_FILE
+          echo "meson: $(meson --version)" | tee -a $ENV_FILE
+          echo "ninja: $(ninja --version)" | tee -a $ENV_FILE
+          echo "cmake: $(cmake --version | head -1)" | tee -a $ENV_FILE
+          echo "automake: $(automake --version | head -1)" | tee -a $ENV_FILE
+          echo "autoconf: $(autoconf --version | head -1)" | tee -a $ENV_FILE
+          echo "libtool: $(glibtool --version | head -1)" | tee -a $ENV_FILE
+          echo "pkg-config: $(pkg-config --version)" | tee -a $ENV_FILE
+          echo "nasm: $(nasm --version)" | tee -a $ENV_FILE
+          echo "" | tee -a $ENV_FILE
+          
+          echo "## Dart Version" | tee -a $ENV_FILE
+          dart --version 2>&1 | tee -a $ENV_FILE
+          echo "" | tee -a $ENV_FILE
+          
+          echo "## Python Version" | tee -a $ENV_FILE
+          python3 --version | tee -a $ENV_FILE
+          echo "" | tee -a $ENV_FILE
+          
+          echo "============================================" | tee -a $ENV_FILE
+          
+          # Store for later use
+          cp $ENV_FILE /tmp/Compile/build-environment.txt
 
       - name: Run iOS build with workspace
         run: |
@@ -138,10 +200,182 @@ jobs:
             echo "Install directory not found"
           fi
 
-      - name: Upload XCFramework artifact
+      - name: Package build artifacts
+        id: package
+        run: |
+          BUILD_TAG="${{ steps.build-info.outputs.build_tag }}"
+          OUTPUT_DIR="/tmp/Compile/example/libvips/output"
+          PACKAGE_DIR="/tmp/package"
+          
+          mkdir -p $PACKAGE_DIR
+          
+          # Copy XCFramework and create tarball
+          if [ -d "$OUTPUT_DIR/libvips.xcframework" ]; then
+            cp -r "$OUTPUT_DIR/libvips.xcframework" "$PACKAGE_DIR/"
+            cp /tmp/Compile/build-environment.txt "$PACKAGE_DIR/"
+            
+            # Create compressed archive
+            cd $PACKAGE_DIR
+            ARCHIVE_NAME="libvips-ios-${BUILD_TAG}.tar.xz"
+            tar -cJf "/tmp/${ARCHIVE_NAME}" .
+            
+            echo "archive_path=/tmp/${ARCHIVE_NAME}" >> $GITHUB_OUTPUT
+            echo "archive_name=${ARCHIVE_NAME}" >> $GITHUB_OUTPUT
+            
+            echo "Created archive: ${ARCHIVE_NAME}"
+            ls -lh "/tmp/${ARCHIVE_NAME}"
+          else
+            echo "XCFramework not found, build may have failed"
+            exit 1
+          fi
+
+      - name: Upload build artifact
         uses: actions/upload-artifact@v4
-        if: success()
         with:
-          name: libvips-ios-xcframework
-          path: /tmp/Compile/example/libvips/output/
-          retention-days: 7
+          name: libvips-ios-${{ steps.build-info.outputs.build_tag }}
+          path: ${{ steps.package.outputs.archive_path }}
+          retention-days: 30
+
+      - name: Generate release notes
+        id: release-notes
+        run: |
+          BUILD_TAG="${{ steps.build-info.outputs.build_tag }}"
+          BUILD_TIME="${{ steps.build-info.outputs.build_time }}"
+          MOBIPKG_REF="${{ steps.clone-mobipkg.outputs.mobipkg_ref }}"
+          MOBIPKG_COMMIT="${{ steps.clone-mobipkg.outputs.mobipkg_commit }}"
+          
+          cat << 'RELEASE_EOF' > /tmp/release-notes.md
+          # iOS libvips Build - ${{ steps.build-info.outputs.build_tag }}
+          
+          ## Build Information
+          
+          | Item | Value |
+          |------|-------|
+          | **Build Date** | ${{ steps.build-info.outputs.build_date }} |
+          | **Build Time (UTC)** | ${BUILD_TIME} |
+          | **Build Tag** | ${BUILD_TAG} |
+          | **GitHub Run ID** | ${{ github.run_id }} |
+          | **GitHub Run Number** | ${{ github.run_number }} |
+          
+          ## Source References
+          
+          ### This Repository
+          - **Repository**: [${{ github.repository }}](https://github.com/${{ github.repository }})
+          - **Commit**: [${{ github.sha }}](https://github.com/${{ github.repository }}/commit/${{ github.sha }})
+          - **Workflow File**: [build-ios-libvips.yml](https://github.com/${{ github.repository }}/blob/${{ github.sha }}/.github/workflows/build-ios-libvips.yml)
+          - **Workflow Run**: [Run #${{ github.run_number }}](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})
+          
+          ### MobiPkg/Compile (Build System)
+          - **Repository**: [MobiPkg/Compile](https://github.com/MobiPkg/Compile)
+          - **Branch/Ref**: `${MOBIPKG_REF}`
+          - **Commit SHA**: [`${MOBIPKG_COMMIT}`](https://github.com/MobiPkg/Compile/commit/${MOBIPKG_COMMIT})
+          - **Build Script**: [build-ios-with-workspace.sh](https://github.com/MobiPkg/Compile/blob/${MOBIPKG_COMMIT}/example/libvips/build-ios-with-workspace.sh)
+          - **Workspace Config**: [workspace.yaml](https://github.com/MobiPkg/Compile/blob/${MOBIPKG_COMMIT}/example/libvips/workspace.yaml)
+          - **libvips Config**: [lib.yaml](https://github.com/MobiPkg/Compile/blob/${MOBIPKG_COMMIT}/example/libvips/libvips/lib.yaml)
+          
+          ## GitHub Actions Used
+          
+          | Action | Version |
+          |--------|---------|
+          | actions/checkout | v4 |
+          | maxim-lobanov/setup-xcode | v1 |
+          | dart-lang/setup-dart | v1 |
+          | actions/upload-artifact | v4 |
+          | softprops/action-gh-release | v2 |
+          
+          ## Build Environment
+          
+          ### System
+          - **Runner**: `macos-14` (Apple Silicon)
+          - **Architecture**: arm64
+          
+          ### macOS & Xcode
+          RELEASE_EOF
+          
+          # Append actual version info from the build
+          echo '```' >> /tmp/release-notes.md
+          sw_vers >> /tmp/release-notes.md
+          echo '' >> /tmp/release-notes.md
+          xcodebuild -version >> /tmp/release-notes.md
+          echo '```' >> /tmp/release-notes.md
+          
+          cat << 'RELEASE_EOF2' >> /tmp/release-notes.md
+          
+          ### Build Tools
+          
+          | Tool | Version | Install Command |
+          |------|---------|-----------------|
+          RELEASE_EOF2
+          
+          echo "| meson | $(meson --version) | \`brew install meson\` |" >> /tmp/release-notes.md
+          echo "| ninja | $(ninja --version) | \`brew install ninja\` |" >> /tmp/release-notes.md
+          echo "| cmake | $(cmake --version | head -1 | awk '{print $3}') | \`brew install cmake\` |" >> /tmp/release-notes.md
+          echo "| automake | $(automake --version | head -1 | awk '{print $NF}') | \`brew install automake\` |" >> /tmp/release-notes.md
+          echo "| autoconf | $(autoconf --version | head -1 | awk '{print $NF}') | \`brew install autoconf\` |" >> /tmp/release-notes.md
+          echo "| libtool | $(glibtool --version | head -1 | awk '{print $NF}') | \`brew install libtool\` |" >> /tmp/release-notes.md
+          echo "| pkg-config | $(pkg-config --version) | \`brew install pkg-config\` |" >> /tmp/release-notes.md
+          echo "| nasm | $(nasm --version | awk '{print $3}') | \`brew install nasm\` |" >> /tmp/release-notes.md
+          echo "| Dart SDK | $(dart --version 2>&1 | awk '{print $4}') | \`dart-lang/setup-dart@v1\` |" >> /tmp/release-notes.md
+          echo "| Python | $(python3 --version | awk '{print $2}') | System |" >> /tmp/release-notes.md
+          
+          cat << 'RELEASE_EOF3' >> /tmp/release-notes.md
+          
+          ## Dependencies Installation
+          
+          To reproduce this build environment on macOS:
+          
+          ```bash
+          # Install Homebrew (if not already installed)
+          /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+          
+          # Install build tools
+          brew install meson ninja automake autoconf libtool pkg-config nasm cmake
+          
+          # Install Dart SDK
+          brew tap dart-lang/dart
+          brew install dart
+          ```
+          
+          ## Supported Architectures
+          
+          - `arm64` - iOS devices (iPhone/iPad)
+          - `arm64-simulator` - iOS Simulator on Apple Silicon Macs
+          
+          ## Included Libraries
+          
+          The following libraries are compiled and bundled:
+          
+          | Library | Description |
+          |---------|-------------|
+          | zlib | Compression library |
+          | libffi | Foreign function interface library |
+          | pcre2 | Perl Compatible Regular Expressions |
+          | expat | XML parser library |
+          | glib | Core application building blocks |
+          | libjpeg-turbo | JPEG image codec |
+          | libpng | PNG image codec |
+          | libwebp | WebP image codec |
+          | libvips | Image processing library |
+          
+          ## How to Use
+          
+          1. Download `libvips-ios-*.tar.xz` from this release
+          2. Extract: `tar -xvf libvips-ios-*.tar.xz`
+          3. Add `libvips.xcframework` to your Xcode project
+          
+          RELEASE_EOF3
+          
+          echo "Release notes generated"
+          cat /tmp/release-notes.md
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.build-info.outputs.build_tag }}
+          name: iOS libvips - ${{ steps.build-info.outputs.build_tag }}
+          body_path: /tmp/release-notes.md
+          draft: false
+          prerelease: false
+          files: ${{ steps.package.outputs.archive_path }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
