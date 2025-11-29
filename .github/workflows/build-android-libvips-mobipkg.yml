@@ -228,7 +228,7 @@ jobs:
           echo "============================================"
           if [ -d "$INSTALL_PREFIX/android" ]; then
             echo "### All library files with sizes:"
-            find "$INSTALL_PREFIX/android" -type f \( -name "*.so" -o -name "*.a" \) -exec ls -lh {} \;
+            find "$INSTALL_PREFIX/android" -type f \( -name "*.so" -o -name "*.a" \) -ls
             echo ""
             
             echo "### Library count per architecture:"
@@ -261,11 +261,11 @@ jobs:
           LIBVIPS_FOUND=false
           if [ -d "$INSTALL_PREFIX/android" ]; then
             for arch_dir in "$INSTALL_PREFIX/android"/*; do
-              if [ -d "$arch_dir" ]; then
+              if [ -d "$arch_dir" ] && [ -d "$arch_dir/lib" ]; then
                 arch_name=$(basename "$arch_dir")
-                if find "$arch_dir/lib/" -name "*vips*" -print -quit 2>/dev/null | grep -q .; then
+                if find "$arch_dir/lib" -name "*vips*" -print -quit 2>/dev/null | grep -q .; then
                   echo "✓ libvips found for $arch_name"
-                  find "$arch_dir/lib/" -name "*vips*" -exec ls -lh {} \;
+                  find "$arch_dir/lib" -name "*vips*" -ls
                   LIBVIPS_FOUND=true
                 else
                   echo "✗ libvips NOT found for $arch_name"
