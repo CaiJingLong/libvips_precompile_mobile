@@ -131,9 +131,15 @@ jobs:
 
       - name: Update Conan profiles for Linux host
         run: |
-          # Detect clang version from NDK
-          CLANG_VERSION=$($ANDROID_NDK/toolchains/llvm/prebuilt/linux-x86_64/bin/clang --version | head -1 | grep -oP 'clang version \K\d+')
+          # Detect clang version from NDK (using portable grep/awk)
+          CLANG_VERSION=$($ANDROID_NDK/toolchains/llvm/prebuilt/linux-x86_64/bin/clang --version | head -1 | grep -o 'clang version [0-9]*' | grep -o '[0-9]*')
           echo "Detected Clang version: $CLANG_VERSION"
+          
+          # Validate clang version was detected
+          if [ -z "$CLANG_VERSION" ]; then
+            echo "Error: Failed to detect clang version from NDK"
+            exit 1
+          fi
           
           # Update cross-compilation profiles to work on Linux
           for profile in cross/android-*.ini; do
