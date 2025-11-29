@@ -119,17 +119,34 @@ jobs:
           echo "Patching libffi configuration"
           echo "============================================"
           echo ""
+          
+          # Validate that the config file exists
+          if [ ! -f "$LIBFFI_CONFIG" ]; then
+            echo "ERROR: libffi config file not found at: $LIBFFI_CONFIG"
+            echo "The MobiPkg/Compile repository structure may have changed."
+            exit 1
+          fi
+          
           echo "Original libffi lib.yaml:"
           cat "$LIBFFI_CONFIG"
           echo ""
           
           # Remove the precompile section that runs autogen.sh
-          # Using sed to remove lines between 'precompile:' and the next section
-          sed -i '/^precompile:/,/^[a-z]/{ /^precompile:/d; /^[[:space:]]*-/d; }' "$LIBFFI_CONFIG"
+          # Match 'precompile:' and remove it along with subsequent list items (lines starting with spaces and -)
+          # Stop when reaching another YAML section (line starting with a letter followed by word chars and colon)
+          sed -i '/^precompile:/,/^[a-z][a-z_]*:/{ /^precompile:/d; /^[[:space:]]*-/d; }' "$LIBFFI_CONFIG"
           
           echo "============================================"
           echo "Patched libffi lib.yaml:"
           cat "$LIBFFI_CONFIG"
+          echo ""
+          
+          # Verify the patch was successful - precompile should no longer exist
+          if grep -q "^precompile:" "$LIBFFI_CONFIG"; then
+            echo "WARNING: precompile section still exists after patching"
+          else
+            echo "SUCCESS: precompile section removed"
+          fi
           echo "============================================"
 
       - name: Install Dart dependencies
