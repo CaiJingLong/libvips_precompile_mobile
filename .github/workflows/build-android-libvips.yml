@@ -62,6 +62,14 @@ jobs:
           
           # Create default Conan profile
           conan profile detect --force
+          
+          # Configure Conan with increased retries and timeout for network issues
+          mkdir -p ~/.conan2
+          cat >> ~/.conan2/global.conf << EOF
+          core.download:retry=5
+          core.download:retry_wait=10
+          EOF
+          echo "Conan global.conf configured with retry settings"
 
       - name: Setup Android NDK
         id: setup-ndk
@@ -123,10 +131,22 @@ jobs:
 
       - name: Update Conan profiles for Linux host
         run: |
+          # Detect clang version from NDK (using portable grep/awk)
+          CLANG_VERSION=$($ANDROID_NDK/toolchains/llvm/prebuilt/linux-x86_64/bin/clang --version | head -1 | grep -o 'clang version [0-9]*' | grep -o '[0-9]*')
+          echo "Detected Clang version: $CLANG_VERSION"
+          
+          # Validate clang version was detected
+          if [ -z "$CLANG_VERSION" ]; then
+            echo "Error: Failed to detect clang version from NDK"
+            exit 1
+          fi
+          
           # Update cross-compilation profiles to work on Linux
           for profile in cross/android-*.ini; do
             # Replace darwin-x86_64 with linux-x86_64 for Linux runners
             sed -i 's/darwin-x86_64/linux-x86_64/g' "$profile"
+            # Update compiler version to match NDK clang version
+            sed -i "s/compiler.version=14/compiler.version=$CLANG_VERSION/g" "$profile"
             echo "Updated: $profile"
           done
           
@@ -134,60 +154,80 @@ jobs:
           cat cross/android-arm64-v8a.ini
 
       - name: Build Android arm64-v8a
-        run: |
-          echo "Building for arm64-v8a..."
-          
-          conan install . \
-            --build="missing" \
-            -of output \
-            -o "*:shared=True" \
-            -o "libelf/*:shared=False" \
-            -o "libgettext/*:shared=False" \
-            --profile:host cross/android-arm64-v8a.ini \
-            -d custom_deploy.py \
-            -v
+        uses: nick-invision/retry@v3
+        with:
+          timeout_minutes: 60
+          max_attempts: 3
+          retry_wait_seconds: 30
+          command: |
+            echo "Building for arm64-v8a..."
+            
+            conan install . \
+              --build="missing" \
+              -of output \
+              -o "*:shared=True" \
+              -o "libelf/*:shared=False" \
+              -o "libgettext/*:shared=False" \
+              --profile:host cross/android-arm64-v8a.ini \
+              -d custom_deploy.py \
+              -v
 
       - name: Build Android armeabi-v7a
-        run: |
-          echo "Building for armeabi-v7a..."
-          
-          conan install . \
-            --build="missing" \
-            -of output \
-            -o "*:shared=True" \
-            -o "libelf/*:shared=False" \
-            -o "libgettext/*:shared=False" \
-            --profile:host cross/android-armv7.ini \
-            -d custom_deploy.py \
-            -v
+        uses: nick-invision/retry@v3
+        with:
+          timeout_minutes: 60
+          max_attempts: 3
+          retry_wait_seconds: 30
+          command: |
+            echo "Building for armeabi-v7a..."
+            
+            conan install . \
+              --build="missing" \
+              -of output \
+              -o "*:shared=True" \
+              -o "libelf/*:shared=False" \
+              -o "libgettext/*:shared=False" \
+              --profile:host cross/android-armv7.ini \
+              -d custom_deploy.py \
+              -v
 
       - name: Build Android x86
-        run: |
-          echo "Building for x86..."
-          
-          conan install . \
-            --build="missing" \
-            -of output \
-            -o "*:shared=True" \
-            -o "libelf/*:shared=False" \
-            -o "libgettext/*:shared=False" \
-            --profile:host cross/android-x86.ini \
-            -d custom_deploy.py \
-            -v
+        uses: nick-invision/retry@v3
+        with:
+          timeout_minutes: 60
+          max_attempts: 3
+          retry_wait_seconds: 30
+          command: |
+            echo "Building for x86..."
+            
+            conan install . \
+              --build="missing" \
+              -of output \
+              -o "*:shared=True" \
+              -o "libelf/*:shared=False" \
+              -o "libgettext/*:shared=False" \
+              --profile:host cross/android-x86.ini \
+              -d custom_deploy.py \
+              -v
 
       - name: Build Android x86_64
-        run: |
-          echo "Building for x86_64..."
-          
-          conan install . \
-            --build="missing" \
-            -of output \
-            -o "*:shared=True" \
-            -o "libelf/*:shared=False" \
-            -o "libgettext/*:shared=False" \
-            --profile:host cross/android-x86_64.ini \
-            -d custom_deploy.py \
-            -v
+        uses: nick-invision/retry@v3
+        with:
+          timeout_minutes: 60
+          max_attempts: 3
+          retry_wait_seconds: 30
+          command: |
+            echo "Building for x86_64..."
+            
+            conan install . \
+              --build="missing" \
+              -of output \
+              -o "*:shared=True" \
+              -o "libelf/*:shared=False" \
+              -o "libgettext/*:shared=False" \
+              --profile:host cross/android-x86_64.ini \
+              -d custom_deploy.py \
+              -v
 
       - name: Create jniLibs folder structure
         run: |
@@ -311,6 +351,7 @@ jobs:
           | actions/checkout | v4 |
           | actions/setup-python | v5 |
           | android-actions/setup-android | v3 |
+          | nick-invision/retry | v3 |
           | actions/upload-artifact | v4 |
           | softprops/action-gh-release | v2 |
           
