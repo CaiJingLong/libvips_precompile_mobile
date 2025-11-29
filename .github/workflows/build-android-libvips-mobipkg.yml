@@ -214,11 +214,10 @@ jobs:
           
           mkdir -p "$PACKAGE_DIR/jniLibs"
           
-          # Map MobiPkg architecture names to Android ABI names
-          # arm64 -> arm64-v8a
-          # armv7a/arm -> armeabi-v7a
-          # x86 -> x86
-          # x86_64 -> x86_64
+          # Map architecture directory names to Android ABI names
+          # MobiPkg may output either Android ABI names directly (arm64-v8a, armeabi-v7a)
+          # or architecture names (arm64, armv7a) depending on the version/configuration.
+          # This mapping handles both cases for compatibility.
           
           if [ -d "$INSTALL_PREFIX/android" ]; then
             # Find and copy libraries for each architecture
@@ -228,10 +227,10 @@ jobs:
                 
                 # Map architecture names
                 case "$arch_name" in
-                  arm64|aarch64)
+                  arm64|aarch64|arm64-v8a)
                     abi_name="arm64-v8a"
                     ;;
-                  armv7a|arm|armv7)
+                  armv7a|arm|armv7|armeabi-v7a)
                     abi_name="armeabi-v7a"
                     ;;
                   x86)
