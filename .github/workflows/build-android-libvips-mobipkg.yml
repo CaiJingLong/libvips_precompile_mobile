@@ -248,14 +248,26 @@ jobs:
                 
                 mkdir -p "$PACKAGE_DIR/jniLibs/$abi_name"
                 
-                # Copy .so files
+                # Copy .so files (shared libraries)
                 if [ -d "$arch_dir/lib" ]; then
-                  cp "$arch_dir/lib"/*.so "$PACKAGE_DIR/jniLibs/$abi_name/" 2>/dev/null || true
+                  so_count=$(find "$arch_dir/lib" -maxdepth 1 -name "*.so" 2>/dev/null | wc -l)
+                  if [ "$so_count" -gt 0 ]; then
+                    cp "$arch_dir/lib"/*.so "$PACKAGE_DIR/jniLibs/$abi_name/"
+                    echo "  Copied $so_count .so files for $abi_name"
+                  else
+                    echo "  No .so files found for $abi_name"
+                  fi
                 fi
                 
                 # Copy .a files (static libraries)
                 if [ -d "$arch_dir/lib" ]; then
-                  cp "$arch_dir/lib"/*.a "$PACKAGE_DIR/jniLibs/$abi_name/" 2>/dev/null || true
+                  a_count=$(find "$arch_dir/lib" -maxdepth 1 -name "*.a" 2>/dev/null | wc -l)
+                  if [ "$a_count" -gt 0 ]; then
+                    cp "$arch_dir/lib"/*.a "$PACKAGE_DIR/jniLibs/$abi_name/"
+                    echo "  Copied $a_count .a files for $abi_name"
+                  else
+                    echo "  No .a files found for $abi_name"
+                  fi
                 fi
                 
                 echo "Copied libraries for $arch_name -> $abi_name"
@@ -465,7 +477,7 @@ jobs:
           | Build System | Dart-based workspace | Python-based Conan |
           | Dependency Management | workspace.yaml | conanfile.py |
           | Configuration | lib.yaml files | Conan profiles |
-          | Shared Libraries | No | Yes |
+          | Library Type | Static (.a) + Shared (.so) if available | Shared (.so) primarily |
           
           RELEASE_EOF3
           
