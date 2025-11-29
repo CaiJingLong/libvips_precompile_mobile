@@ -1,0 +1,485 @@
+name: Build Android libvips (MobiPkg)
+
+on:
+  workflow_dispatch:
+
+# This workflow builds libvips for Android using MobiPkg/Compile
+# Build script source: https://github.com/MobiPkg/Compile/blob/main/example/libvips/build-android-with-workspace.sh
+#
+# Note: This is an alternative approach to the Conan-based build.
+# The libvips version is defined in the MobiPkg/Compile repository's
+# example/libvips/libvips/lib.yaml file. To build a different version,
+# you would need to modify that file in the cloned repository.
+
+jobs:
+  build-android:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    outputs:
+      build_date: ${{ steps.build-info.outputs.build_date }}
+      build_tag: ${{ steps.build-info.outputs.build_tag }}
+      mobipkg_ref: ${{ steps.clone-mobipkg.outputs.mobipkg_ref }}
+      mobipkg_commit: ${{ steps.clone-mobipkg.outputs.mobipkg_commit }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Generate build information
+        id: build-info
+        run: |
+          BUILD_DATE=$(date -u +"%Y-%m-%d")
+          BUILD_TAG="android-mobipkg-${BUILD_DATE}-${{ github.run_number }}"
+          BUILD_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+          echo "build_date=${BUILD_DATE}" >> $GITHUB_OUTPUT
+          echo "build_tag=${BUILD_TAG}" >> $GITHUB_OUTPUT
+          echo "build_time=${BUILD_TIME}" >> $GITHUB_OUTPUT
+          echo "Build Date: ${BUILD_DATE}"
+          echo "Build Tag: ${BUILD_TAG}"
+          echo "Build Time: ${BUILD_TIME}"
+
+      - name: Install build dependencies
+        id: install-deps
+        run: |
+          sudo apt-get update
+          # Install required build tools
+          # These are the dependencies required by MobiPkg/Compile build scripts
+          sudo apt-get install -y \
+            meson \
+            ninja-build \
+            automake \
+            autoconf \
+            libtool \
+            pkg-config \
+            nasm \
+            cmake \
+            xz-utils
+          
+          # Record installed versions
+          echo "apt_packages=meson ninja-build automake autoconf libtool pkg-config nasm cmake xz-utils" >> $GITHUB_OUTPUT
+
+      - name: Setup Dart SDK
+        uses: dart-lang/setup-dart@v1
+        with:
+          sdk: stable
+
+      - name: Setup Android NDK
+        id: setup-ndk
+        uses: android-actions/setup-android@v3
+        
+      - name: Install Android NDK
+        id: ndk-install
+        run: |
+          # Install NDK 25
+          sdkmanager --install "ndk;25.2.9519653"
+          
+          # Set NDK path
+          NDK_PATH="${ANDROID_HOME}/ndk/25.2.9519653"
+          echo "ANDROID_NDK_HOME=${NDK_PATH}" >> $GITHUB_ENV
+          echo "ndk_path=${NDK_PATH}" >> $GITHUB_OUTPUT
+          echo "ndk_version=25.2.9519653" >> $GITHUB_OUTPUT
+          
+          echo "NDK installed at: ${NDK_PATH}"
+
+      - name: Clone MobiPkg/Compile
+        id: clone-mobipkg
+        run: |
+          # Clone with full history to get the exact ref
+          git clone https://github.com/MobiPkg/Compile.git /tmp/Compile
+          cd /tmp/Compile
+          
+          # Get the current commit SHA and ref
+          MOBIPKG_COMMIT=$(git rev-parse HEAD)
+          MOBIPKG_SHORT_COMMIT=$(git rev-parse --short HEAD)
+          MOBIPKG_REF="main"
+          
+          echo "mobipkg_ref=${MOBIPKG_REF}" >> $GITHUB_OUTPUT
+          echo "mobipkg_commit=${MOBIPKG_COMMIT}" >> $GITHUB_OUTPUT
+          echo "mobipkg_short_commit=${MOBIPKG_SHORT_COMMIT}" >> $GITHUB_OUTPUT
+          
+          echo "MobiPkg/Compile ref: ${MOBIPKG_REF}"
+          echo "MobiPkg/Compile commit: ${MOBIPKG_COMMIT}"
+
+      - name: Install Dart dependencies
+        run: |
+          cd /tmp/Compile
+          dart pub get
+
+      - name: Collect build environment information
+        id: env-info
+        run: |
+          # Create environment info file
+          ENV_FILE="/tmp/build-environment.txt"
+          
+          echo "============================================" | tee $ENV_FILE
+          echo "Build Environment Information" | tee -a $ENV_FILE
+          echo "============================================" | tee -a $ENV_FILE
+          echo "" | tee -a $ENV_FILE
+          
+          echo "## System Information" | tee -a $ENV_FILE
+          echo "Machine architecture: $(uname -m)" | tee -a $ENV_FILE
+          echo "Kernel: $(uname -sr)" | tee -a $ENV_FILE
+          echo "" | tee -a $ENV_FILE
+          
+          echo "## Linux Distribution" | tee -a $ENV_FILE
+          cat /etc/os-release | tee -a $ENV_FILE
+          echo "" | tee -a $ENV_FILE
+          
+          echo "## Android NDK" | tee -a $ENV_FILE
+          echo "NDK Path: ${ANDROID_NDK_HOME}" | tee -a $ENV_FILE
+          echo "NDK Version: ${{ steps.ndk-install.outputs.ndk_version }}" | tee -a $ENV_FILE
+          echo "" | tee -a $ENV_FILE
+          
+          echo "## Build Tools Versions" | tee -a $ENV_FILE
+          echo "meson: $(meson --version)" | tee -a $ENV_FILE
+          echo "ninja: $(ninja --version)" | tee -a $ENV_FILE
+          echo "cmake: $(cmake --version | head -1)" | tee -a $ENV_FILE
+          echo "automake: $(automake --version | head -1)" | tee -a $ENV_FILE
+          echo "autoconf: $(autoconf --version | head -1)" | tee -a $ENV_FILE
+          echo "libtool: $(libtool --version | head -1)" | tee -a $ENV_FILE
+          echo "pkg-config: $(pkg-config --version)" | tee -a $ENV_FILE
+          echo "nasm: $(nasm --version)" | tee -a $ENV_FILE
+          echo "" | tee -a $ENV_FILE
+          
+          echo "## Dart Version" | tee -a $ENV_FILE
+          dart --version 2>&1 | tee -a $ENV_FILE
+          echo "" | tee -a $ENV_FILE
+          
+          echo "## Python Version" | tee -a $ENV_FILE
+          python3 --version | tee -a $ENV_FILE
+          echo "" | tee -a $ENV_FILE
+          
+          echo "============================================" | tee -a $ENV_FILE
+          
+          # Store for later use
+          cp $ENV_FILE /tmp/Compile/build-environment.txt
+
+      - name: Run Android build with workspace
+        run: |
+          cd /tmp/Compile
+          
+          # Set up install directory
+          INSTALL_PREFIX="/tmp/Compile/example/libvips/install"
+          mkdir -p "$INSTALL_PREFIX"
+          
+          echo "============================================"
+          echo "Starting libvips Android build using workspace"
+          echo "Install prefix: $INSTALL_PREFIX"
+          echo "ANDROID_NDK_HOME: $ANDROID_NDK_HOME"
+          echo "============================================"
+          
+          # Run the workspace build command
+          # This compiles all dependencies defined in workspace.yaml:
+          # - zlib
+          # - libffi
+          # - pcre2
+          # - expat
+          # - glib
+          # - libjpeg-turbo
+          # - libpng
+          # - libwebp
+          # - libvips
+          dart run bin/compile.dart workspace -C example/libvips \
+            --android --no-ios \
+            --install-prefix "$INSTALL_PREFIX" \
+            --dependency-prefix "$INSTALL_PREFIX" \
+            --target libvips
+
+      - name: Display build output
+        run: |
+          echo "============================================"
+          echo "Build Output"
+          echo "============================================"
+          
+          INSTALL_PREFIX="/tmp/Compile/example/libvips/install"
+          
+          echo "Install directory structure:"
+          if [ -d "$INSTALL_PREFIX" ]; then
+            ls -la "$INSTALL_PREFIX"
+            
+            if [ -d "$INSTALL_PREFIX/android" ]; then
+              echo ""
+              echo "Android directory structure:"
+              find "$INSTALL_PREFIX/android" -type f \( -name "*.so" -o -name "*.a" \) | head -30
+            fi
+          else
+            echo "Install directory not found"
+          fi
+
+      - name: Create jniLibs structure
+        id: create-jnilibs
+        run: |
+          INSTALL_PREFIX="/tmp/Compile/example/libvips/install"
+          PACKAGE_DIR="/tmp/package"
+          
+          mkdir -p "$PACKAGE_DIR/jniLibs"
+          
+          # Map MobiPkg architecture names to Android ABI names
+          # arm64 -> arm64-v8a
+          # armv7a/arm -> armeabi-v7a
+          # x86 -> x86
+          # x86_64 -> x86_64
+          
+          if [ -d "$INSTALL_PREFIX/android" ]; then
+            # Find and copy libraries for each architecture
+            for arch_dir in "$INSTALL_PREFIX/android"/*; do
+              if [ -d "$arch_dir" ]; then
+                arch_name=$(basename "$arch_dir")
+                
+                # Map architecture names
+                case "$arch_name" in
+                  arm64|aarch64)
+                    abi_name="arm64-v8a"
+                    ;;
+                  armv7a|arm|armv7)
+                    abi_name="armeabi-v7a"
+                    ;;
+                  x86)
+                    abi_name="x86"
+                    ;;
+                  x86_64)
+                    abi_name="x86_64"
+                    ;;
+                  *)
+                    echo "Unknown architecture: $arch_name, skipping..."
+                    continue
+                    ;;
+                esac
+                
+                mkdir -p "$PACKAGE_DIR/jniLibs/$abi_name"
+                
+                # Copy .so files
+                if [ -d "$arch_dir/lib" ]; then
+                  cp "$arch_dir/lib"/*.so "$PACKAGE_DIR/jniLibs/$abi_name/" 2>/dev/null || true
+                fi
+                
+                # Copy .a files (static libraries)
+                if [ -d "$arch_dir/lib" ]; then
+                  cp "$arch_dir/lib"/*.a "$PACKAGE_DIR/jniLibs/$abi_name/" 2>/dev/null || true
+                fi
+                
+                echo "Copied libraries for $arch_name -> $abi_name"
+              fi
+            done
+            
+            # Copy headers from first available architecture
+            for arch_dir in "$INSTALL_PREFIX/android"/*; do
+              if [ -d "$arch_dir/include" ]; then
+                cp -r "$arch_dir/include" "$PACKAGE_DIR/jniLibs/"
+                echo "Copied headers from $(basename "$arch_dir")"
+                break
+              fi
+            done
+          fi
+          
+          # Copy build environment info
+          cp /tmp/Compile/build-environment.txt "$PACKAGE_DIR/jniLibs/"
+          
+          echo "jniLibs structure created:"
+          find "$PACKAGE_DIR/jniLibs" -type f | head -50
+          
+          echo "package_dir=$PACKAGE_DIR" >> $GITHUB_OUTPUT
+
+      - name: Package build artifacts
+        id: package
+        run: |
+          BUILD_TAG="${{ steps.build-info.outputs.build_tag }}"
+          PACKAGE_DIR="${{ steps.create-jnilibs.outputs.package_dir }}"
+          
+          # Create compressed archive
+          cd "$PACKAGE_DIR"
+          ARCHIVE_NAME="libvips-android-mobipkg-${BUILD_TAG}.tar.xz"
+          tar -cJf "/tmp/${ARCHIVE_NAME}" jniLibs
+          
+          echo "archive_path=/tmp/${ARCHIVE_NAME}" >> $GITHUB_OUTPUT
+          echo "archive_name=${ARCHIVE_NAME}" >> $GITHUB_OUTPUT
+          
+          echo "Created archive: ${ARCHIVE_NAME}"
+          ls -lh "/tmp/${ARCHIVE_NAME}"
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: libvips-android-mobipkg-${{ steps.build-info.outputs.build_tag }}
+          path: ${{ steps.package.outputs.archive_path }}
+          retention-days: 30
+
+      - name: Generate release notes
+        id: release-notes
+        run: |
+          BUILD_TAG="${{ steps.build-info.outputs.build_tag }}"
+          BUILD_TIME="${{ steps.build-info.outputs.build_time }}"
+          MOBIPKG_REF="${{ steps.clone-mobipkg.outputs.mobipkg_ref }}"
+          MOBIPKG_COMMIT="${{ steps.clone-mobipkg.outputs.mobipkg_commit }}"
+          NDK_VERSION="${{ steps.ndk-install.outputs.ndk_version }}"
+          
+          cat << RELEASE_EOF > /tmp/release-notes.md
+          # Android libvips Build (MobiPkg) - ${BUILD_TAG}
+          
+          ## Build Information
+          
+          | Item | Value |
+          |------|-------|
+          | **Build Date** | ${{ steps.build-info.outputs.build_date }} |
+          | **Build Time (UTC)** | ${BUILD_TIME} |
+          | **Build Tag** | ${BUILD_TAG} |
+          | **Build Method** | MobiPkg/Compile |
+          | **GitHub Run ID** | ${{ github.run_id }} |
+          | **GitHub Run Number** | ${{ github.run_number }} |
+          
+          ## Source References
+          
+          ### This Repository
+          - **Repository**: [${{ github.repository }}](https://github.com/${{ github.repository }})
+          - **Commit**: [${{ github.sha }}](https://github.com/${{ github.repository }}/commit/${{ github.sha }})
+          - **Workflow File**: [build-android-libvips-mobipkg.yml](https://github.com/${{ github.repository }}/blob/${{ github.sha }}/.github/workflows/build-android-libvips-mobipkg.yml)
+          - **Workflow Run**: [Run #${{ github.run_number }}](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})
+          
+          ### MobiPkg/Compile (Build System)
+          - **Repository**: [MobiPkg/Compile](https://github.com/MobiPkg/Compile)
+          - **Branch/Ref**: \`${MOBIPKG_REF}\`
+          - **Commit SHA**: [\`${MOBIPKG_COMMIT}\`](https://github.com/MobiPkg/Compile/commit/${MOBIPKG_COMMIT})
+          - **Build Script**: [build-android-with-workspace.sh](https://github.com/MobiPkg/Compile/blob/${MOBIPKG_COMMIT}/example/libvips/build-android-with-workspace.sh)
+          - **Workspace Config**: [workspace.yaml](https://github.com/MobiPkg/Compile/blob/${MOBIPKG_COMMIT}/example/libvips/workspace.yaml)
+          - **libvips Config**: [lib.yaml](https://github.com/MobiPkg/Compile/blob/${MOBIPKG_COMMIT}/example/libvips/libvips/lib.yaml)
+          
+          ## GitHub Actions Used
+          
+          | Action | Version |
+          |--------|---------|
+          | actions/checkout | v4 |
+          | dart-lang/setup-dart | v1 |
+          | android-actions/setup-android | v3 |
+          | actions/upload-artifact | v4 |
+          | softprops/action-gh-release | v2 |
+          
+          ## Build Environment
+          
+          ### System
+          - **Runner**: \`ubuntu-latest\`
+          - **Architecture**: x86_64
+          
+          ### Linux Distribution
+          RELEASE_EOF
+          
+          echo '```' >> /tmp/release-notes.md
+          cat /etc/os-release >> /tmp/release-notes.md
+          echo '```' >> /tmp/release-notes.md
+          
+          cat << RELEASE_EOF2 >> /tmp/release-notes.md
+          
+          ### Android NDK
+          - **Version**: ${NDK_VERSION}
+          - **Path**: \`\${ANDROID_HOME}/ndk/${NDK_VERSION}\`
+          
+          ### Build Tools
+          
+          | Tool | Version | Install Command |
+          |------|---------|-----------------|
+          RELEASE_EOF2
+          
+          echo "| meson | $(meson --version) | \`sudo apt-get install meson\` |" >> /tmp/release-notes.md
+          echo "| ninja | $(ninja --version) | \`sudo apt-get install ninja-build\` |" >> /tmp/release-notes.md
+          echo "| cmake | $(cmake --version | head -1 | awk '{print $3}') | \`sudo apt-get install cmake\` |" >> /tmp/release-notes.md
+          echo "| automake | $(automake --version | head -1 | awk '{print $NF}') | \`sudo apt-get install automake\` |" >> /tmp/release-notes.md
+          echo "| autoconf | $(autoconf --version | head -1 | awk '{print $NF}') | \`sudo apt-get install autoconf\` |" >> /tmp/release-notes.md
+          echo "| libtool | $(libtool --version | head -1 | awk '{print $NF}') | \`sudo apt-get install libtool\` |" >> /tmp/release-notes.md
+          echo "| pkg-config | $(pkg-config --version) | \`sudo apt-get install pkg-config\` |" >> /tmp/release-notes.md
+          echo "| nasm | $(nasm --version | awk '{print $3}') | \`sudo apt-get install nasm\` |" >> /tmp/release-notes.md
+          echo "| Dart SDK | $(dart --version 2>&1 | awk '{print $4}') | \`dart-lang/setup-dart@v1\` |" >> /tmp/release-notes.md
+          echo "| Python | $(python3 --version | awk '{print $2}') | System |" >> /tmp/release-notes.md
+          
+          cat << 'RELEASE_EOF3' >> /tmp/release-notes.md
+          
+          ## Dependencies Installation
+          
+          To reproduce this build environment on Ubuntu/Debian Linux:
+          
+          ```bash
+          # Update package list
+          sudo apt-get update
+          
+          # Install system dependencies
+          sudo apt-get install -y \
+            meson \
+            ninja-build \
+            automake \
+            autoconf \
+            libtool \
+            pkg-config \
+            nasm \
+            cmake \
+            xz-utils
+          
+          # Install Dart SDK
+          sudo apt-get install -y apt-transport-https
+          wget -qO- https://dl-ssl.google.com/linux/linux_signing_key.pub | sudo gpg --dearmor -o /usr/share/keyrings/dart.gpg
+          echo 'deb [signed-by=/usr/share/keyrings/dart.gpg arch=amd64] https://storage.googleapis.com/download.dartlang.org/linux/debian stable main' | sudo tee /etc/apt/sources.list.d/dart_stable.list
+          sudo apt-get update
+          sudo apt-get install -y dart
+          
+          # Install Android NDK via sdkmanager or download from:
+          # https://developer.android.com/ndk/downloads
+          export ANDROID_NDK_HOME=/path/to/your/ndk
+          ```
+          
+          ## Supported Architectures
+          
+          | Architecture | Android ABI | Description |
+          |-------------|-------------|-------------|
+          | arm64 | arm64-v8a | 64-bit ARM devices |
+          | armv7a | armeabi-v7a | 32-bit ARM devices |
+          | x86 | x86 | 32-bit x86 emulator |
+          | x86_64 | x86_64 | 64-bit x86 emulator |
+          
+          ## Included Libraries
+          
+          The following libraries are compiled and bundled:
+          
+          | Library | Description |
+          |---------|-------------|
+          | zlib | Compression library |
+          | libffi | Foreign function interface library |
+          | pcre2 | Perl Compatible Regular Expressions |
+          | expat | XML parser library |
+          | glib | Core application building blocks |
+          | libjpeg-turbo | JPEG image codec |
+          | libpng | PNG image codec |
+          | libwebp | WebP image codec |
+          | libvips | Image processing library |
+          
+          ## How to Use
+          
+          1. Download `libvips-android-mobipkg-*.tar.xz` from this release
+          2. Extract: `tar -xvf libvips-android-mobipkg-*.tar.xz`
+          3. Copy `jniLibs` folder to your Android project's `app/src/main/` directory
+          4. Copy `include` folder if you need C/C++ headers
+          
+          ## Comparison with Conan Build
+          
+          This build uses MobiPkg/Compile as an alternative to the Conan-based build.
+          The main differences are:
+          
+          | Aspect | MobiPkg Build | Conan Build |
+          |--------|--------------|-------------|
+          | Build System | Dart-based workspace | Python-based Conan |
+          | Dependency Management | workspace.yaml | conanfile.py |
+          | Configuration | lib.yaml files | Conan profiles |
+          | Shared Libraries | No | Yes |
+          
+          RELEASE_EOF3
+          
+          echo "Release notes generated"
+          cat /tmp/release-notes.md
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.build-info.outputs.build_tag }}
+          name: Android libvips (MobiPkg) - ${{ steps.build-info.outputs.build_tag }}
+          body_path: /tmp/release-notes.md
+          draft: false
+          prerelease: false
+          files: ${{ steps.package.outputs.archive_path }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
