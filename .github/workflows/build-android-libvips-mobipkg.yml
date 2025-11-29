@@ -103,6 +103,52 @@ jobs:
           echo "MobiPkg/Compile ref: ${MOBIPKG_REF}"
           echo "MobiPkg/Compile commit: ${MOBIPKG_COMMIT}"
 
+      - name: Patch libffi configuration
+        run: |
+          # Fix libffi build issue: autogen.sh fails with modern libtool (2.4.7+)
+          # because LT_SYS_SYMBOL_USCORE macro was removed in newer libtool versions.
+          # 
+          # The libffi v3.5.2 git tag already includes a pre-generated configure script,
+          # so we can skip the autogen.sh step entirely.
+          #
+          # This patch removes the precompile section from libffi's lib.yaml
+          
+          LIBFFI_CONFIG="/tmp/Compile/example/libvips/deps/libffi/lib.yaml"
+          
+          echo "============================================"
+          echo "Patching libffi configuration"
+          echo "============================================"
+          echo ""
+          
+          # Validate that the config file exists
+          if [ ! -f "$LIBFFI_CONFIG" ]; then
+            echo "ERROR: libffi config file not found at: $LIBFFI_CONFIG"
+            echo "The MobiPkg/Compile repository structure may have changed."
+            exit 1
+          fi
+          
+          echo "Original libffi lib.yaml:"
+          cat "$LIBFFI_CONFIG"
+          echo ""
+          
+          # Remove the precompile section that runs autogen.sh
+          # Match 'precompile:' and remove it along with subsequent list items (lines starting with spaces and -)
+          # Stop when reaching another YAML section (line starting with a letter followed by word chars and colon)
+          sed -i '/^precompile:/,/^[a-z][a-z_]*:/{ /^precompile:/d; /^[[:space:]]*-/d; }' "$LIBFFI_CONFIG"
+          
+          echo "============================================"
+          echo "Patched libffi lib.yaml:"
+          cat "$LIBFFI_CONFIG"
+          echo ""
+          
+          # Verify the patch was successful - precompile should no longer exist
+          if grep -q "^precompile:" "$LIBFFI_CONFIG"; then
+            echo "WARNING: precompile section still exists after patching"
+          else
+            echo "SUCCESS: precompile section removed"
+          fi
+          echo "============================================"
+
       - name: Install Dart dependencies
         run: |
           cd /tmp/Compile
