@@ -192,10 +192,10 @@ jobs:
             --android-cpu arm64-v8a,armeabi-v7a \
             --install-prefix "$INSTALL_PREFIX" \
             --dependency-prefix "$INSTALL_PREFIX" \
-            --target libvips 2>&1 | tee /tmp/build-output.log
+            --target libvips
           
-          # Store exit code from dart command (via PIPESTATUS)
-          BUILD_EXIT_CODE=${PIPESTATUS[0]}
+          # Store exit code from dart command
+          BUILD_EXIT_CODE=$?
           echo "build_exit_code=$BUILD_EXIT_CODE" >> $GITHUB_OUTPUT
           echo "install_prefix=$INSTALL_PREFIX" >> $GITHUB_OUTPUT
           
@@ -217,7 +217,7 @@ jobs:
           echo "## Install Directory Tree (Full)"
           echo "============================================"
           if [ -d "$INSTALL_PREFIX" ]; then
-            tree -a -h --dirsfirst "$INSTALL_PREFIX" 2>/dev/null || find "$INSTALL_PREFIX" -type f -exec ls -lh {} \;
+            tree -a -h --dirsfirst "$INSTALL_PREFIX" 2>/dev/null || find "$INSTALL_PREFIX" -ls
           else
             echo "ERROR: Install directory not found at $INSTALL_PREFIX"
           fi
@@ -263,8 +263,9 @@ jobs:
             for arch_dir in "$INSTALL_PREFIX/android"/*; do
               if [ -d "$arch_dir" ]; then
                 arch_name=$(basename "$arch_dir")
-                if ls "$arch_dir/lib/"*vips* 2>/dev/null; then
+                if find "$arch_dir/lib/" -name "*vips*" -print -quit 2>/dev/null | grep -q .; then
                   echo "✓ libvips found for $arch_name"
+                  find "$arch_dir/lib/" -name "*vips*" -exec ls -lh {} \;
                   LIBVIPS_FOUND=true
                 else
                   echo "✗ libvips NOT found for $arch_name"
@@ -397,7 +398,7 @@ jobs:
           echo "============================================"
           echo "jniLibs Package Structure (File Tree)"
           echo "============================================"
-          tree -a -h --dirsfirst "$PACKAGE_DIR/jniLibs" 2>/dev/null || find "$PACKAGE_DIR/jniLibs" -type f -exec ls -lh {} \;
+          tree -a -h --dirsfirst "$PACKAGE_DIR/jniLibs" 2>/dev/null || find "$PACKAGE_DIR/jniLibs" -ls
           
           echo ""
           echo "============================================"
