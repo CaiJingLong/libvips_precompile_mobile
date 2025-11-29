@@ -10,7 +10,7 @@ class DepLibVips(ConanFile):
         # self.requires('libiconv/1.17')
         self.requires('libgettext/0.22')
         # self.requires('pcre2/10.42')
-        self.requires('glib/2.78.0')
+        self.requires('glib/2.78.3')
         self.requires('libvips/8.14.2')
         # self.requires('libtiff/4.6.0')
         # self.requires("libiconv/1.17")
