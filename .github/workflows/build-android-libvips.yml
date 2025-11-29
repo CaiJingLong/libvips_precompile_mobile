@@ -1,0 +1,442 @@
+name: Build Android libvips
+
+on:
+  workflow_dispatch:
+
+# This workflow builds libvips for Android using Conan package manager
+# Build scripts: build_android.py, conanfile.py, custom_deploy.py
+#
+# Note: The build process uses Conan to manage dependencies and cross-compile
+# for Android architectures (arm64-v8a, armeabi-v7a, x86, x86_64)
+
+jobs:
+  build-android:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    outputs:
+      build_date: ${{ steps.build-info.outputs.build_date }}
+      build_tag: ${{ steps.build-info.outputs.build_tag }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Generate build information
+        id: build-info
+        run: |
+          BUILD_DATE=$(date -u +"%Y-%m-%d")
+          BUILD_TAG="android-${BUILD_DATE}-${{ github.run_number }}"
+          BUILD_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+          echo "build_date=${BUILD_DATE}" >> $GITHUB_OUTPUT
+          echo "build_tag=${BUILD_TAG}" >> $GITHUB_OUTPUT
+          echo "build_time=${BUILD_TIME}" >> $GITHUB_OUTPUT
+          echo "Build Date: ${BUILD_DATE}"
+          echo "Build Tag: ${BUILD_TAG}"
+          echo "Build Time: ${BUILD_TIME}"
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            ninja-build \
+            meson \
+            pkg-config \
+            autoconf \
+            automake \
+            libtool \
+            nasm \
+            cmake \
+            xz-utils
+          
+          echo "System dependencies installed"
+
+      - name: Install Conan
+        run: |
+          pip install conan
+          conan --version
+          
+          # Create default Conan profile
+          conan profile detect --force
+
+      - name: Setup Android NDK
+        id: setup-ndk
+        uses: android-actions/setup-android@v3
+        
+      - name: Install Android NDK
+        id: ndk-install
+        run: |
+          # Install NDK 25
+          sdkmanager --install "ndk;25.2.9519653"
+          
+          # Set NDK path
+          NDK_PATH="${ANDROID_HOME}/ndk/25.2.9519653"
+          echo "ANDROID_NDK=${NDK_PATH}" >> $GITHUB_ENV
+          echo "ndk_path=${NDK_PATH}" >> $GITHUB_OUTPUT
+          echo "ndk_version=25.2.9519653" >> $GITHUB_OUTPUT
+          
+          echo "NDK installed at: ${NDK_PATH}"
+
+      - name: Collect build environment information
+        id: env-info
+        run: |
+          # Create environment info file
+          ENV_FILE="build-environment.txt"
+          
+          echo "============================================" | tee $ENV_FILE
+          echo "Build Environment Information" | tee -a $ENV_FILE
+          echo "============================================" | tee -a $ENV_FILE
+          echo "" | tee -a $ENV_FILE
+          
+          echo "## System Information" | tee -a $ENV_FILE
+          echo "Machine architecture: $(uname -m)" | tee -a $ENV_FILE
+          echo "Kernel: $(uname -sr)" | tee -a $ENV_FILE
+          echo "" | tee -a $ENV_FILE
+          
+          echo "## Linux Distribution" | tee -a $ENV_FILE
+          cat /etc/os-release | tee -a $ENV_FILE
+          echo "" | tee -a $ENV_FILE
+          
+          echo "## Android NDK" | tee -a $ENV_FILE
+          echo "NDK Path: ${ANDROID_NDK}" | tee -a $ENV_FILE
+          echo "NDK Version: ${{ steps.ndk-install.outputs.ndk_version }}" | tee -a $ENV_FILE
+          echo "" | tee -a $ENV_FILE
+          
+          echo "## Build Tools Versions" | tee -a $ENV_FILE
+          echo "Python: $(python3 --version)" | tee -a $ENV_FILE
+          echo "Conan: $(conan --version)" | tee -a $ENV_FILE
+          echo "meson: $(meson --version)" | tee -a $ENV_FILE
+          echo "ninja: $(ninja --version)" | tee -a $ENV_FILE
+          echo "cmake: $(cmake --version | head -1)" | tee -a $ENV_FILE
+          echo "automake: $(automake --version | head -1)" | tee -a $ENV_FILE
+          echo "autoconf: $(autoconf --version | head -1)" | tee -a $ENV_FILE
+          echo "libtool: $(libtool --version | head -1)" | tee -a $ENV_FILE
+          echo "pkg-config: $(pkg-config --version)" | tee -a $ENV_FILE
+          echo "nasm: $(nasm --version)" | tee -a $ENV_FILE
+          echo "" | tee -a $ENV_FILE
+          
+          echo "============================================" | tee -a $ENV_FILE
+
+      - name: Update Conan profiles for Linux host
+        run: |
+          # Update cross-compilation profiles to work on Linux
+          for profile in cross/android-*.ini; do
+            # Replace darwin-x86_64 with linux-x86_64 for Linux runners
+            sed -i 's/darwin-x86_64/linux-x86_64/g' "$profile"
+            echo "Updated: $profile"
+          done
+          
+          # Show updated profiles
+          cat cross/android-arm64-v8a.ini
+
+      - name: Build Android arm64-v8a
+        run: |
+          echo "Building for arm64-v8a..."
+          
+          conan install . \
+            --build="missing" \
+            -of output \
+            -o "*:shared=True" \
+            -o "libelf/*:shared=False" \
+            -o "libgettext/*:shared=False" \
+            --profile:host cross/android-arm64-v8a.ini \
+            -d custom_deploy.py \
+            -v
+
+      - name: Build Android armeabi-v7a
+        run: |
+          echo "Building for armeabi-v7a..."
+          
+          conan install . \
+            --build="missing" \
+            -of output \
+            -o "*:shared=True" \
+            -o "libelf/*:shared=False" \
+            -o "libgettext/*:shared=False" \
+            --profile:host cross/android-armv7.ini \
+            -d custom_deploy.py \
+            -v
+
+      - name: Build Android x86
+        run: |
+          echo "Building for x86..."
+          
+          conan install . \
+            --build="missing" \
+            -of output \
+            -o "*:shared=True" \
+            -o "libelf/*:shared=False" \
+            -o "libgettext/*:shared=False" \
+            --profile:host cross/android-x86.ini \
+            -d custom_deploy.py \
+            -v
+
+      - name: Build Android x86_64
+        run: |
+          echo "Building for x86_64..."
+          
+          conan install . \
+            --build="missing" \
+            -of output \
+            -o "*:shared=True" \
+            -o "libelf/*:shared=False" \
+            -o "libgettext/*:shared=False" \
+            --profile:host cross/android-x86_64.ini \
+            -d custom_deploy.py \
+            -v
+
+      - name: Create jniLibs folder structure
+        run: |
+          # Create jniLibs directory structure
+          mkdir -p output/android/jniLibs/arm64-v8a
+          mkdir -p output/android/jniLibs/armeabi-v7a
+          mkdir -p output/android/jniLibs/x86
+          mkdir -p output/android/jniLibs/x86_64
+          
+          # Copy libraries for each architecture
+          if [ -d "output/Release/Android/armv8/lib" ]; then
+            cp output/Release/Android/armv8/lib/*.so output/android/jniLibs/arm64-v8a/ 2>/dev/null || true
+            cp output/Release/Android/armv8/lib/*.a output/android/jniLibs/arm64-v8a/ 2>/dev/null || true
+          fi
+          
+          if [ -d "output/Release/Android/armv7/lib" ]; then
+            cp output/Release/Android/armv7/lib/*.so output/android/jniLibs/armeabi-v7a/ 2>/dev/null || true
+            cp output/Release/Android/armv7/lib/*.a output/android/jniLibs/armeabi-v7a/ 2>/dev/null || true
+          fi
+          
+          if [ -d "output/Release/Android/x86/lib" ]; then
+            cp output/Release/Android/x86/lib/*.so output/android/jniLibs/x86/ 2>/dev/null || true
+            cp output/Release/Android/x86/lib/*.a output/android/jniLibs/x86/ 2>/dev/null || true
+          fi
+          
+          if [ -d "output/Release/Android/x86_64/lib" ]; then
+            cp output/Release/Android/x86_64/lib/*.so output/android/jniLibs/x86_64/ 2>/dev/null || true
+            cp output/Release/Android/x86_64/lib/*.a output/android/jniLibs/x86_64/ 2>/dev/null || true
+          fi
+          
+          # Copy headers (from arm64-v8a as reference)
+          if [ -d "output/Release/Android/armv8/include" ]; then
+            cp -r output/Release/Android/armv8/include output/android/jniLibs/
+          fi
+          
+          echo "jniLibs structure created:"
+          find output/android/jniLibs -type f | head -50
+
+      - name: Display build output
+        run: |
+          echo "============================================"
+          echo "Build Output"
+          echo "============================================"
+          
+          echo "Release folder structure:"
+          ls -la output/Release/Android/ 2>/dev/null || echo "Release folder not found"
+          
+          echo ""
+          echo "jniLibs folder structure:"
+          ls -la output/android/jniLibs/ 2>/dev/null || echo "jniLibs folder not found"
+          
+          for arch in arm64-v8a armeabi-v7a x86 x86_64; do
+            echo ""
+            echo "Libraries for $arch:"
+            ls output/android/jniLibs/$arch/*.so 2>/dev/null | head -20 || echo "No .so files found for $arch"
+          done
+
+      - name: Package build artifacts
+        id: package
+        run: |
+          BUILD_TAG="${{ steps.build-info.outputs.build_tag }}"
+          
+          # Copy environment info
+          cp build-environment.txt output/android/jniLibs/
+          
+          # Create compressed archive
+          cd output/android
+          ARCHIVE_NAME="libvips-android-${BUILD_TAG}.tar.xz"
+          tar -cJf "/tmp/${ARCHIVE_NAME}" jniLibs
+          
+          echo "archive_path=/tmp/${ARCHIVE_NAME}" >> $GITHUB_OUTPUT
+          echo "archive_name=${ARCHIVE_NAME}" >> $GITHUB_OUTPUT
+          
+          echo "Created archive: ${ARCHIVE_NAME}"
+          ls -lh "/tmp/${ARCHIVE_NAME}"
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: libvips-android-${{ steps.build-info.outputs.build_tag }}
+          path: ${{ steps.package.outputs.archive_path }}
+          retention-days: 30
+
+      - name: Generate release notes
+        id: release-notes
+        run: |
+          BUILD_TAG="${{ steps.build-info.outputs.build_tag }}"
+          BUILD_TIME="${{ steps.build-info.outputs.build_time }}"
+          NDK_VERSION="${{ steps.ndk-install.outputs.ndk_version }}"
+          
+          cat << 'RELEASE_EOF' > /tmp/release-notes.md
+          # Android libvips Build - ${{ steps.build-info.outputs.build_tag }}
+          
+          ## Build Information
+          
+          | Item | Value |
+          |------|-------|
+          | **Build Date** | ${{ steps.build-info.outputs.build_date }} |
+          | **Build Time (UTC)** | ${BUILD_TIME} |
+          | **Build Tag** | ${BUILD_TAG} |
+          | **GitHub Run ID** | ${{ github.run_id }} |
+          | **GitHub Run Number** | ${{ github.run_number }} |
+          
+          ## Source References
+          
+          ### This Repository
+          - **Repository**: [${{ github.repository }}](https://github.com/${{ github.repository }})
+          - **Commit**: [${{ github.sha }}](https://github.com/${{ github.repository }}/commit/${{ github.sha }})
+          - **Workflow File**: [build-android-libvips.yml](https://github.com/${{ github.repository }}/blob/${{ github.sha }}/.github/workflows/build-android-libvips.yml)
+          - **Workflow Run**: [Run #${{ github.run_number }}](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})
+          
+          ### Build Scripts
+          - **Main Build Script**: [build_android.py](https://github.com/${{ github.repository }}/blob/${{ github.sha }}/build_android.py)
+          - **Conan File**: [conanfile.py](https://github.com/${{ github.repository }}/blob/${{ github.sha }}/conanfile.py)
+          - **Deploy Script**: [custom_deploy.py](https://github.com/${{ github.repository }}/blob/${{ github.sha }}/custom_deploy.py)
+          
+          ## GitHub Actions Used
+          
+          | Action | Version |
+          |--------|---------|
+          | actions/checkout | v4 |
+          | actions/setup-python | v5 |
+          | android-actions/setup-android | v3 |
+          | actions/upload-artifact | v4 |
+          | softprops/action-gh-release | v2 |
+          
+          ## Build Environment
+          
+          ### System
+          - **Runner**: `ubuntu-latest`
+          - **Architecture**: x86_64
+          
+          ### Linux Distribution
+          RELEASE_EOF
+          
+          echo '```' >> /tmp/release-notes.md
+          cat /etc/os-release >> /tmp/release-notes.md
+          echo '```' >> /tmp/release-notes.md
+          
+          cat << RELEASE_EOF2 >> /tmp/release-notes.md
+          
+          ### Android NDK
+          - **Version**: ${NDK_VERSION}
+          - **Path**: \`\${ANDROID_HOME}/ndk/${NDK_VERSION}\`
+          
+          ### Build Tools
+          
+          | Tool | Version | Install Command |
+          |------|---------|-----------------|
+          RELEASE_EOF2
+          
+          echo "| Python | $(python3 --version | awk '{print $2}') | \`actions/setup-python@v5\` |" >> /tmp/release-notes.md
+          echo "| Conan | $(conan --version | awk '{print $3}') | \`pip install conan\` |" >> /tmp/release-notes.md
+          echo "| meson | $(meson --version) | \`sudo apt-get install meson\` |" >> /tmp/release-notes.md
+          echo "| ninja | $(ninja --version) | \`sudo apt-get install ninja-build\` |" >> /tmp/release-notes.md
+          echo "| cmake | $(cmake --version | head -1 | awk '{print $3}') | \`sudo apt-get install cmake\` |" >> /tmp/release-notes.md
+          echo "| automake | $(automake --version | head -1 | awk '{print $NF}') | \`sudo apt-get install automake\` |" >> /tmp/release-notes.md
+          echo "| autoconf | $(autoconf --version | head -1 | awk '{print $NF}') | \`sudo apt-get install autoconf\` |" >> /tmp/release-notes.md
+          echo "| libtool | $(libtool --version | head -1 | awk '{print $NF}') | \`sudo apt-get install libtool\` |" >> /tmp/release-notes.md
+          echo "| pkg-config | $(pkg-config --version) | \`sudo apt-get install pkg-config\` |" >> /tmp/release-notes.md
+          echo "| nasm | $(nasm --version | awk '{print $3}') | \`sudo apt-get install nasm\` |" >> /tmp/release-notes.md
+          
+          cat << 'RELEASE_EOF3' >> /tmp/release-notes.md
+          
+          ## Dependencies Installation
+          
+          To reproduce this build environment on Ubuntu/Debian Linux:
+          
+          ```bash
+          # Update package list
+          sudo apt-get update
+          
+          # Install system dependencies
+          sudo apt-get install -y \
+            ninja-build \
+            meson \
+            pkg-config \
+            autoconf \
+            automake \
+            libtool \
+            nasm \
+            cmake \
+            xz-utils \
+            python3 \
+            python3-pip
+          
+          # Install Conan
+          pip install conan
+          
+          # Setup Conan profile
+          conan profile detect --force
+          
+          # Install Android NDK via sdkmanager or download from:
+          # https://developer.android.com/ndk/downloads
+          export ANDROID_NDK=/path/to/your/ndk
+          ```
+          
+          ## Supported Architectures
+          
+          | Architecture | Android ABI | Description |
+          |-------------|-------------|-------------|
+          | armv8 | arm64-v8a | 64-bit ARM devices |
+          | armv7 | armeabi-v7a | 32-bit ARM devices |
+          | x86 | x86 | 32-bit x86 emulator |
+          | x86_64 | x86_64 | 64-bit x86 emulator |
+          
+          ## Included Libraries
+          
+          The following libraries are compiled and bundled (managed by Conan):
+          
+          | Library | Description |
+          |---------|-------------|
+          | glib | Core application building blocks |
+          | libgettext | Internationalization library |
+          | libvips | Image processing library |
+          | libjpeg-turbo | JPEG image codec |
+          | libpng | PNG image codec |
+          | libwebp | WebP image codec |
+          | libtiff | TIFF image codec |
+          | zlib | Compression library |
+          | libffi | Foreign function interface library |
+          | pcre2 | Perl Compatible Regular Expressions |
+          | expat | XML parser library |
+          | fftw | Fast Fourier Transform library |
+          | lcms2 | Little CMS color management library |
+          | libdeflate | Fast compression library |
+          | zstd | Zstandard compression |
+          | bzip2 | Compression library |
+          
+          ## How to Use
+          
+          1. Download `libvips-android-*.tar.xz` from this release
+          2. Extract: `tar -xvf libvips-android-*.tar.xz`
+          3. Copy `jniLibs` folder to your Android project's `app/src/main/` directory
+          4. Copy `include` folder if you need C/C++ headers
+          
+          RELEASE_EOF3
+          
+          echo "Release notes generated"
+          cat /tmp/release-notes.md
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.build-info.outputs.build_tag }}
+          name: Android libvips - ${{ steps.build-info.outputs.build_tag }}
+          body_path: /tmp/release-notes.md
+          draft: false
+          prerelease: false
+          files: ${{ steps.package.outputs.archive_path }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
