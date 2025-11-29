@@ -278,8 +278,8 @@ jobs:
           BUILD_TIME="${{ steps.build-info.outputs.build_time }}"
           NDK_VERSION="${{ steps.ndk-install.outputs.ndk_version }}"
           
-          cat << 'RELEASE_EOF' > /tmp/release-notes.md
-          # Android libvips Build - ${{ steps.build-info.outputs.build_tag }}
+          cat << RELEASE_EOF > /tmp/release-notes.md
+          # Android libvips Build - ${BUILD_TAG}
           
           ## Build Information
           
@@ -317,7 +317,7 @@ jobs:
           ## Build Environment
           
           ### System
-          - **Runner**: `ubuntu-latest`
+          - **Runner**: \`ubuntu-latest\`
           - **Architecture**: x86_64
           
           ### Linux Distribution
