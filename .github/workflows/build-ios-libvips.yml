@@ -244,8 +244,8 @@ jobs:
           MOBIPKG_REF="${{ steps.clone-mobipkg.outputs.mobipkg_ref }}"
           MOBIPKG_COMMIT="${{ steps.clone-mobipkg.outputs.mobipkg_commit }}"
           
-          cat << 'RELEASE_EOF' > /tmp/release-notes.md
-          # iOS libvips Build - ${{ steps.build-info.outputs.build_tag }}
+          cat << RELEASE_EOF > /tmp/release-notes.md
+          # iOS libvips Build - ${BUILD_TAG}
           
           ## Build Information
           
@@ -267,8 +267,8 @@ jobs:
           
           ### MobiPkg/Compile (Build System)
           - **Repository**: [MobiPkg/Compile](https://github.com/MobiPkg/Compile)
-          - **Branch/Ref**: `${MOBIPKG_REF}`
-          - **Commit SHA**: [`${MOBIPKG_COMMIT}`](https://github.com/MobiPkg/Compile/commit/${MOBIPKG_COMMIT})
+          - **Branch/Ref**: \`${MOBIPKG_REF}\`
+          - **Commit SHA**: [\`${MOBIPKG_COMMIT}\`](https://github.com/MobiPkg/Compile/commit/${MOBIPKG_COMMIT})
           - **Build Script**: [build-ios-with-workspace.sh](https://github.com/MobiPkg/Compile/blob/${MOBIPKG_COMMIT}/example/libvips/build-ios-with-workspace.sh)
           - **Workspace Config**: [workspace.yaml](https://github.com/MobiPkg/Compile/blob/${MOBIPKG_COMMIT}/example/libvips/workspace.yaml)
           - **libvips Config**: [lib.yaml](https://github.com/MobiPkg/Compile/blob/${MOBIPKG_COMMIT}/example/libvips/libvips/lib.yaml)
@@ -286,7 +286,7 @@ jobs:
           ## Build Environment
           
           ### System
-          - **Runner**: `macos-14` (Apple Silicon)
+          - **Runner**: \`macos-14\` (Apple Silicon)
           - **Architecture**: arm64
           
           ### macOS & Xcode
