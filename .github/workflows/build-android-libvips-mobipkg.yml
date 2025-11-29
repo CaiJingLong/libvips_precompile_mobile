@@ -139,16 +139,20 @@ jobs:
           # Patch 1: Change source from git to tarball URL
           # Replace the git source block with a URL source block
           # The tarball includes pre-generated configure, so autogen.sh won't be needed
+          LIBFFI_VERSION="3.5.2"
+          LIBFFI_TARBALL_URL="https://github.com/libffi/libffi/releases/download/v${LIBFFI_VERSION}/libffi-${LIBFFI_VERSION}.tar.gz"
+          
           sed -i 's|^source:$|source:|' "$LIBFFI_CONFIG"
-          sed -i '/^  git:$/,/^  ref: v[0-9.]*$/{
-            /^  git:$/c\  url: https://github.com/libffi/libffi/releases/download/v3.5.2/libffi-3.5.2.tar.gz
-            /^    url:.*$/d
-            /^    ref:.*$/c\  type: tar.gz
-          }' "$LIBFFI_CONFIG"
+          sed -i "/^  git:\$/,/^  ref: v[0-9.]*\$/{
+            /^  git:\$/c\\  url: ${LIBFFI_TARBALL_URL}
+            /^    url:.*\$/d
+            /^    ref:.*\$/c\\  type: tar.gz
+          }" "$LIBFFI_CONFIG"
           
           # Patch 2: Remove precompile section entirely
           # Match 'precompile:' and remove it along with its list items
-          sed -i '/^precompile:/,/^[a-z]/{/^precompile:/d;/^  - /d}' "$LIBFFI_CONFIG"
+          # Use more specific pattern '/^[a-z][a-z_]*:/' to match only YAML section headers
+          sed -i '/^precompile:/,/^[a-z][a-z_]*:/{/^precompile:/d;/^  - /d}' "$LIBFFI_CONFIG"
           
           echo "============================================"
           echo "Patched libffi lib.yaml:"
