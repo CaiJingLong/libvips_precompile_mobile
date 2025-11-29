@@ -131,10 +131,16 @@ jobs:
 
       - name: Update Conan profiles for Linux host
         run: |
+          # Detect clang version from NDK
+          CLANG_VERSION=$($ANDROID_NDK/toolchains/llvm/prebuilt/linux-x86_64/bin/clang --version | head -1 | grep -oP 'clang version \K\d+')
+          echo "Detected Clang version: $CLANG_VERSION"
+          
           # Update cross-compilation profiles to work on Linux
           for profile in cross/android-*.ini; do
             # Replace darwin-x86_64 with linux-x86_64 for Linux runners
             sed -i 's/darwin-x86_64/linux-x86_64/g' "$profile"
+            # Update compiler version to match NDK clang version
+            sed -i "s/compiler.version=14/compiler.version=$CLANG_VERSION/g" "$profile"
             echo "Updated: $profile"
           done
           
