@@ -103,6 +103,35 @@ jobs:
           echo "MobiPkg/Compile ref: ${MOBIPKG_REF}"
           echo "MobiPkg/Compile commit: ${MOBIPKG_COMMIT}"
 
+      - name: Patch libffi configuration
+        run: |
+          # Fix libffi build issue: autogen.sh fails with modern libtool (2.4.7+)
+          # because LT_SYS_SYMBOL_USCORE macro was removed in newer libtool versions.
+          # 
+          # The libffi v3.5.2 git tag already includes a pre-generated configure script,
+          # so we can skip the autogen.sh step entirely.
+          #
+          # This patch removes the precompile section from libffi's lib.yaml
+          
+          LIBFFI_CONFIG="/tmp/Compile/example/libvips/deps/libffi/lib.yaml"
+          
+          echo "============================================"
+          echo "Patching libffi configuration"
+          echo "============================================"
+          echo ""
+          echo "Original libffi lib.yaml:"
+          cat "$LIBFFI_CONFIG"
+          echo ""
+          
+          # Remove the precompile section that runs autogen.sh
+          # Using sed to remove lines between 'precompile:' and the next section
+          sed -i '/^precompile:/,/^[a-z]/{ /^precompile:/d; /^[[:space:]]*-/d; }' "$LIBFFI_CONFIG"
+          
+          echo "============================================"
+          echo "Patched libffi lib.yaml:"
+          cat "$LIBFFI_CONFIG"
+          echo "============================================"
+
       - name: Install Dart dependencies
         run: |
           cd /tmp/Compile
