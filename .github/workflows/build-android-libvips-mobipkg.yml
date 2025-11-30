@@ -2,6 +2,11 @@ name: Build Android libvips (MobiPkg)
 
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - 'copilot/update-build-android-libvips'
+    paths:
+      - '.github/workflows/build-android-libvips-mobipkg.yml'
 
 # This workflow builds libvips for Android using MobiPkg/Compile
 # Build script source: https://github.com/MobiPkg/Compile/blob/main/example/libvips/build-android-with-workspace.sh
