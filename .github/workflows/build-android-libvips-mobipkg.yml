@@ -2,11 +2,6 @@ name: Build Android libvips (MobiPkg)
 
 on:
   workflow_dispatch:
-  push:
-    branches:
-      - 'copilot/update-build-android-libvips'
-    paths:
-      - '.github/workflows/build-android-libvips-mobipkg.yml'
 
 # This workflow builds libvips for Android using MobiPkg/Compile
 # Build script source: https://github.com/MobiPkg/Compile/blob/main/example/libvips/build-android-with-workspace.sh
@@ -120,8 +115,9 @@ jobs:
           # - autogen.sh -> autoreconf -> autoconf fails due to missing LT_SYS_SYMBOL_USCORE
           #
           # Solution:
-          # Change libffi source from git to tarball URL. The GitHub release tarball
-          # includes a pre-generated configure script, so autogen.sh is not needed.
+          # Remove the precompile section from libffi's lib.yaml.
+          # The libffi v3.5.2 git tag already includes a pre-generated configure script,
+          # so we just need to skip autogen.sh.
           
           LIBFFI_CONFIG="/tmp/Compile/example/libvips/deps/libffi/lib.yaml"
           
@@ -141,36 +137,11 @@ jobs:
           cat "$LIBFFI_CONFIG"
           echo ""
           
-          # Patch 1: Change source from git to http tarball URL
-          # Replace the git source block with an http source block
-          # The tarball includes pre-generated configure, so autogen.sh won't be needed
-          #
-          # Original format:
-          #   source:
-          #     git:
-          #       url: https://github.com/libffi/libffi.git
-          #       ref: v3.5.2
-          #
-          # Target format:
-          #   source:
-          #     http:
-          #       url: https://github.com/libffi/libffi/releases/download/v3.5.2/libffi-3.5.2.tar.gz
-          #       type: tar.gz
-          
-          LIBFFI_VERSION="3.5.2"
-          LIBFFI_TARBALL_URL="https://github.com/libffi/libffi/releases/download/v${LIBFFI_VERSION}/libffi-${LIBFFI_VERSION}.tar.gz"
-          
-          # Use sed to replace git section with http section
-          sed -i "/^  git:\$/,/^    ref:.*\$/{
-            /^  git:\$/c\\  http:
-            /^    url:.*\$/c\\    url: ${LIBFFI_TARBALL_URL}
-            /^    ref:.*\$/c\\    type: tar.gz
-          }" "$LIBFFI_CONFIG"
-          
-          # Patch 2: Remove precompile section entirely
+          # Remove precompile section entirely
+          # The libffi v3.5.2 git tag includes pre-generated configure script
           # Match 'precompile:' and remove it along with its list items
           # Use more specific pattern '/^[a-z][a-z_]*:/' to match only YAML section headers
-          sed -i '/^precompile:/,/^[a-z][a-z_]*:/{/^precompile:/d;/^  - /d}' "$LIBFFI_CONFIG"
+          sed -i '/^precompile:/,/^[a-z][a-z_]*:/{/^precompile:/d;/^[[:space:]]*-/d}' "$LIBFFI_CONFIG"
           
           echo "============================================"
           echo "Patched libffi lib.yaml:"
@@ -178,53 +149,14 @@ jobs:
           echo ""
           
           # Verify changes - fail if patching was not successful
-          PATCH_FAILED=false
-          
-          if grep -q "^  http:" "$LIBFFI_CONFIG"; then
-            echo "✓ Source changed to http format"
-          else
-            echo "✗ ERROR: Source was not changed to http format"
-            PATCH_FAILED=true
-          fi
-          
-          if grep -q "url:.*libffi.*tar.gz" "$LIBFFI_CONFIG"; then
-            echo "✓ HTTP URL set to tarball"
-          else
-            echo "✗ ERROR: HTTP URL was not properly set"
-            PATCH_FAILED=true
-          fi
-          
-          if grep -q "type: tar.gz" "$LIBFFI_CONFIG"; then
-            echo "✓ Source type set to tar.gz"
-          else
-            echo "✗ ERROR: Source type was not set to tar.gz"
-            PATCH_FAILED=true
-          fi
-          
-          if grep -q "^  git:" "$LIBFFI_CONFIG"; then
-            echo "✗ ERROR: git section still exists"
-            PATCH_FAILED=true
-          else
-            echo "✓ git section removed"
-          fi
-          
           if grep -q "^precompile:" "$LIBFFI_CONFIG"; then
             echo "✗ ERROR: precompile section still exists"
-            PATCH_FAILED=true
+            exit 1
           else
-            echo "✓ precompile section removed"
+            echo "✓ precompile section removed successfully"
           fi
           
           echo "============================================"
-          
-          if [ "$PATCH_FAILED" = true ]; then
-            echo "ERROR: libffi configuration patching failed!"
-            echo "The MobiPkg/Compile repository structure may have changed."
-            echo "Please check the sed patterns and update them accordingly."
-            exit 1
-          fi
-          
-          echo "SUCCESS: All libffi patches applied successfully!"
 
       - name: Install Dart dependencies
         run: |
