@@ -159,19 +159,47 @@ jobs:
           cat "$LIBFFI_CONFIG"
           echo ""
           
-          # Verify changes
+          # Verify changes - fail if patching was not successful
+          PATCH_FAILED=false
+          
           if grep -q "url:.*libffi.*tar.gz" "$LIBFFI_CONFIG"; then
-            echo "SUCCESS: Source changed to tarball URL"
+            echo "✓ Source changed to tarball URL"
           else
-            echo "WARNING: Source may not have been properly patched"
+            echo "✗ ERROR: Source was not properly changed to tarball URL"
+            PATCH_FAILED=true
+          fi
+          
+          if grep -q "type: tar.gz" "$LIBFFI_CONFIG"; then
+            echo "✓ Source type set to tar.gz"
+          else
+            echo "✗ ERROR: Source type was not set to tar.gz"
+            PATCH_FAILED=true
+          fi
+          
+          if grep -q "^  git:" "$LIBFFI_CONFIG"; then
+            echo "✗ ERROR: git section still exists"
+            PATCH_FAILED=true
+          else
+            echo "✓ git section removed"
           fi
           
           if grep -q "^precompile:" "$LIBFFI_CONFIG"; then
-            echo "WARNING: precompile section still exists"
+            echo "✗ ERROR: precompile section still exists"
+            PATCH_FAILED=true
           else
-            echo "SUCCESS: precompile section removed"
+            echo "✓ precompile section removed"
           fi
+          
           echo "============================================"
+          
+          if [ "$PATCH_FAILED" = true ]; then
+            echo "ERROR: libffi configuration patching failed!"
+            echo "The MobiPkg/Compile repository structure may have changed."
+            echo "Please check the sed patterns and update them accordingly."
+            exit 1
+          fi
+          
+          echo "SUCCESS: All libffi patches applied successfully!"
 
       - name: Install Dart dependencies
         run: |
