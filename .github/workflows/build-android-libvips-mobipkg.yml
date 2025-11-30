@@ -108,10 +108,15 @@ jobs:
           # Fix libffi build issue: autogen.sh fails with modern libtool (2.4.7+)
           # because LT_SYS_SYMBOL_USCORE macro was removed in newer libtool versions.
           # 
-          # The libffi v3.5.2 git tag already includes a pre-generated configure script,
-          # so we can skip the autogen.sh step entirely.
+          # Root cause:
+          # - libffi's configure.ac uses LT_SYS_SYMBOL_USCORE macro which was removed in libtool 2.4.7+
+          # - The git tag only contains configure.ac, not the pre-generated configure script
+          # - MobiPkg/Compile automatically runs autogen.sh when configure is missing
+          # - autogen.sh -> autoreconf -> autoconf fails due to missing LT_SYS_SYMBOL_USCORE
           #
-          # This patch removes the precompile section from libffi's lib.yaml
+          # Solution:
+          # Change libffi source from git to tarball URL. The GitHub release tarball
+          # includes a pre-generated configure script, so autogen.sh is not needed.
           
           LIBFFI_CONFIG="/tmp/Compile/example/libvips/deps/libffi/lib.yaml"
           
@@ -131,19 +136,38 @@ jobs:
           cat "$LIBFFI_CONFIG"
           echo ""
           
-          # Remove the precompile section that runs autogen.sh
-          # Match 'precompile:' and remove it along with subsequent list items (lines starting with spaces and -)
-          # Stop when reaching another YAML section (line starting with a letter followed by word chars and colon)
-          sed -i '/^precompile:/,/^[a-z][a-z_]*:/{ /^precompile:/d; /^[[:space:]]*-/d; }' "$LIBFFI_CONFIG"
+          # Patch 1: Change source from git to tarball URL
+          # Replace the git source block with a URL source block
+          # The tarball includes pre-generated configure, so autogen.sh won't be needed
+          LIBFFI_VERSION="3.5.2"
+          LIBFFI_TARBALL_URL="https://github.com/libffi/libffi/releases/download/v${LIBFFI_VERSION}/libffi-${LIBFFI_VERSION}.tar.gz"
+          
+          sed -i 's|^source:$|source:|' "$LIBFFI_CONFIG"
+          sed -i "/^  git:\$/,/^  ref: v[0-9.]*\$/{
+            /^  git:\$/c\\  url: ${LIBFFI_TARBALL_URL}
+            /^    url:.*\$/d
+            /^    ref:.*\$/c\\  type: tar.gz
+          }" "$LIBFFI_CONFIG"
+          
+          # Patch 2: Remove precompile section entirely
+          # Match 'precompile:' and remove it along with its list items
+          # Use more specific pattern '/^[a-z][a-z_]*:/' to match only YAML section headers
+          sed -i '/^precompile:/,/^[a-z][a-z_]*:/{/^precompile:/d;/^  - /d}' "$LIBFFI_CONFIG"
           
           echo "============================================"
           echo "Patched libffi lib.yaml:"
           cat "$LIBFFI_CONFIG"
           echo ""
           
-          # Verify the patch was successful - precompile should no longer exist
+          # Verify changes
+          if grep -q "url:.*libffi.*tar.gz" "$LIBFFI_CONFIG"; then
+            echo "SUCCESS: Source changed to tarball URL"
+          else
+            echo "WARNING: Source may not have been properly patched"
+          fi
+          
           if grep -q "^precompile:" "$LIBFFI_CONFIG"; then
-            echo "WARNING: precompile section still exists after patching"
+            echo "WARNING: precompile section still exists"
           else
             echo "SUCCESS: precompile section removed"
           fi
