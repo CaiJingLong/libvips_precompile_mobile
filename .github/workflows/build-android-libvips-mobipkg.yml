@@ -141,17 +141,30 @@ jobs:
           cat "$LIBFFI_CONFIG"
           echo ""
           
-          # Patch 1: Change source from git to tarball URL
-          # Replace the git source block with a URL source block
+          # Patch 1: Change source from git to http tarball URL
+          # Replace the git source block with an http source block
           # The tarball includes pre-generated configure, so autogen.sh won't be needed
+          #
+          # Original format:
+          #   source:
+          #     git:
+          #       url: https://github.com/libffi/libffi.git
+          #       ref: v3.5.2
+          #
+          # Target format:
+          #   source:
+          #     http:
+          #       url: https://github.com/libffi/libffi/releases/download/v3.5.2/libffi-3.5.2.tar.gz
+          #       type: tar.gz
+          
           LIBFFI_VERSION="3.5.2"
           LIBFFI_TARBALL_URL="https://github.com/libffi/libffi/releases/download/v${LIBFFI_VERSION}/libffi-${LIBFFI_VERSION}.tar.gz"
           
-          sed -i 's|^source:$|source:|' "$LIBFFI_CONFIG"
-          sed -i "/^  git:\$/,/^  ref: v[0-9.]*\$/{
-            /^  git:\$/c\\  url: ${LIBFFI_TARBALL_URL}
-            /^    url:.*\$/d
-            /^    ref:.*\$/c\\  type: tar.gz
+          # Use sed to replace git section with http section
+          sed -i "/^  git:\$/,/^    ref:.*\$/{
+            /^  git:\$/c\\  http:
+            /^    url:.*\$/c\\    url: ${LIBFFI_TARBALL_URL}
+            /^    ref:.*\$/c\\    type: tar.gz
           }" "$LIBFFI_CONFIG"
           
           # Patch 2: Remove precompile section entirely
@@ -167,10 +180,17 @@ jobs:
           # Verify changes - fail if patching was not successful
           PATCH_FAILED=false
           
-          if grep -q "url:.*libffi.*tar.gz" "$LIBFFI_CONFIG"; then
-            echo "✓ Source changed to tarball URL"
+          if grep -q "^  http:" "$LIBFFI_CONFIG"; then
+            echo "✓ Source changed to http format"
           else
-            echo "✗ ERROR: Source was not properly changed to tarball URL"
+            echo "✗ ERROR: Source was not changed to http format"
+            PATCH_FAILED=true
+          fi
+          
+          if grep -q "url:.*libffi.*tar.gz" "$LIBFFI_CONFIG"; then
+            echo "✓ HTTP URL set to tarball"
+          else
+            echo "✗ ERROR: HTTP URL was not properly set"
             PATCH_FAILED=true
           fi
           
