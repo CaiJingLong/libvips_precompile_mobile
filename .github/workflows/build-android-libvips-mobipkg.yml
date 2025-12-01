@@ -6,14 +6,12 @@ on:
 # This workflow builds libvips for Android using MobiPkg/Compile
 # Build script source: https://github.com/MobiPkg/Compile/blob/main/example/libvips/build-android-with-workspace.sh
 #
-# Note: This is an alternative approach to the Conan-based build.
-# The libvips version is defined in the MobiPkg/Compile repository's
-# example/libvips/libvips/lib.yaml file. To build a different version,
-# you would need to modify that file in the cloned repository.
+# Reference: https://github.com/MobiPkg/Compile/actions/runs/19823807119/job/5679287261
 
 jobs:
   build-android:
     runs-on: ubuntu-latest
+    name: Build libvips Android libraries
     permissions:
       contents: write
     outputs:
@@ -38,60 +36,43 @@ jobs:
           echo "Build Tag: ${BUILD_TAG}"
           echo "Build Time: ${BUILD_TIME}"
 
-      - name: Install build dependencies
-        id: install-deps
-        run: |
-          sudo apt-get update
-          # Install required build tools
-          # These are the dependencies required by MobiPkg/Compile build scripts
-          # Note: libtool-bin is required for libffi's autogen.sh (provides libtoolize with m4 macros)
-          sudo apt-get install -y \
-            meson \
-            ninja-build \
-            automake \
-            autoconf \
-            libtool \
-            libtool-bin \
-            pkg-config \
-            nasm \
-            cmake \
-            xz-utils \
-            tree
-          
-          # Record installed versions
-          echo "apt_packages=meson ninja-build automake autoconf libtool libtool-bin pkg-config nasm cmake xz-utils tree" >> $GITHUB_OUTPUT
-
       - name: Setup Dart SDK
         uses: dart-lang/setup-dart@v1
         with:
           sdk: stable
 
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            autoconf \
+            automake \
+            libtool \
+            pkg-config \
+            gettext \
+            libglib2.0-dev \
+            python3-pip \
+            ninja-build \
+            xz-utils \
+            tree
+          pip3 install meson
+
       - name: Setup Android NDK
-        id: setup-ndk
         uses: android-actions/setup-android@v3
-        
+
       - name: Install Android NDK
         id: ndk-install
         run: |
-          # Install NDK 25
-          sdkmanager --install "ndk;25.2.9519653"
-          
-          # Set NDK path
-          NDK_PATH="${ANDROID_HOME}/ndk/25.2.9519653"
-          echo "ANDROID_NDK_HOME=${NDK_PATH}" >> $GITHUB_ENV
-          echo "ndk_path=${NDK_PATH}" >> $GITHUB_OUTPUT
-          echo "ndk_version=25.2.9519653" >> $GITHUB_OUTPUT
-          
-          echo "NDK installed at: ${NDK_PATH}"
+          sdkmanager --install "ndk;27.0.12077973"
+          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/27.0.12077973" >> $GITHUB_ENV
+          echo "ndk_version=27.0.12077973" >> $GITHUB_OUTPUT
 
       - name: Clone MobiPkg/Compile
         id: clone-mobipkg
         run: |
-          # Clone with full history to get the exact ref
           git clone https://github.com/MobiPkg/Compile.git /tmp/Compile
           cd /tmp/Compile
           
-          # Get the current commit SHA and ref
           MOBIPKG_COMMIT=$(git rev-parse HEAD)
           MOBIPKG_SHORT_COMMIT=$(git rev-parse --short HEAD)
           MOBIPKG_REF="main"
@@ -103,395 +84,184 @@ jobs:
           echo "MobiPkg/Compile ref: ${MOBIPKG_REF}"
           echo "MobiPkg/Compile commit: ${MOBIPKG_COMMIT}"
 
-      - name: Patch libffi configuration
-        run: |
-          # Fix libffi build issue: autogen.sh fails with modern libtool (2.4.7+)
-          # because LT_SYS_SYMBOL_USCORE macro was removed in newer libtool versions.
-          # 
-          # Root cause:
-          # - libffi's configure.ac uses LT_SYS_SYMBOL_USCORE macro which was removed in libtool 2.4.7+
-          # - The git tag only contains configure.ac, not the pre-generated configure script
-          # - MobiPkg/Compile automatically runs autogen.sh when configure is missing
-          # - autogen.sh -> autoreconf -> autoconf fails due to missing LT_SYS_SYMBOL_USCORE
-          #
-          # Solution:
-          # Change libffi source from git to tarball URL. The GitHub release tarball
-          # includes a pre-generated configure script, so autogen.sh is not needed.
-          
-          LIBFFI_CONFIG="/tmp/Compile/example/libvips/deps/libffi/lib.yaml"
-          
-          echo "============================================"
-          echo "Patching libffi configuration"
-          echo "============================================"
-          echo ""
-          
-          # Validate that the config file exists
-          if [ ! -f "$LIBFFI_CONFIG" ]; then
-            echo "ERROR: libffi config file not found at: $LIBFFI_CONFIG"
-            echo "The MobiPkg/Compile repository structure may have changed."
-            exit 1
-          fi
-          
-          echo "Original libffi lib.yaml:"
-          cat "$LIBFFI_CONFIG"
-          echo ""
-          
-          # Patch 1: Change source from git to tarball URL
-          # Replace the git source block with a URL source block
-          # The tarball includes pre-generated configure, so autogen.sh won't be needed
-          LIBFFI_VERSION="3.5.2"
-          LIBFFI_TARBALL_URL="https://github.com/libffi/libffi/releases/download/v${LIBFFI_VERSION}/libffi-${LIBFFI_VERSION}.tar.gz"
-          
-          sed -i 's|^source:$|source:|' "$LIBFFI_CONFIG"
-          sed -i "/^  git:\$/,/^  ref: v[0-9.]*\$/{
-            /^  git:\$/c\\  url: ${LIBFFI_TARBALL_URL}
-            /^    url:.*\$/d
-            /^    ref:.*\$/c\\  type: tar.gz
-          }" "$LIBFFI_CONFIG"
-          
-          # Patch 2: Remove precompile section entirely
-          # Match 'precompile:' and remove it along with its list items
-          # Use more specific pattern '/^[a-z][a-z_]*:/' to match only YAML section headers
-          sed -i '/^precompile:/,/^[a-z][a-z_]*:/{/^precompile:/d;/^  - /d}' "$LIBFFI_CONFIG"
-          
-          echo "============================================"
-          echo "Patched libffi lib.yaml:"
-          cat "$LIBFFI_CONFIG"
-          echo ""
-          
-          # Verify changes
-          if grep -q "url:.*libffi.*tar.gz" "$LIBFFI_CONFIG"; then
-            echo "SUCCESS: Source changed to tarball URL"
-          else
-            echo "WARNING: Source may not have been properly patched"
-          fi
-          
-          if grep -q "^precompile:" "$LIBFFI_CONFIG"; then
-            echo "WARNING: precompile section still exists"
-          else
-            echo "SUCCESS: precompile section removed"
-          fi
-          echo "============================================"
-
-      - name: Install Dart dependencies
+      - name: Get Dart dependencies
         run: |
           cd /tmp/Compile
           dart pub get
 
-      - name: Collect build environment information
-        id: env-info
-        run: |
-          # Create environment info file
-          ENV_FILE="/tmp/build-environment.txt"
-          
-          echo "============================================" | tee $ENV_FILE
-          echo "Build Environment Information" | tee -a $ENV_FILE
-          echo "============================================" | tee -a $ENV_FILE
-          echo "" | tee -a $ENV_FILE
-          
-          echo "## System Information" | tee -a $ENV_FILE
-          echo "Machine architecture: $(uname -m)" | tee -a $ENV_FILE
-          echo "Kernel: $(uname -sr)" | tee -a $ENV_FILE
-          echo "" | tee -a $ENV_FILE
-          
-          echo "## Linux Distribution" | tee -a $ENV_FILE
-          cat /etc/os-release | tee -a $ENV_FILE
-          echo "" | tee -a $ENV_FILE
-          
-          echo "## Android NDK" | tee -a $ENV_FILE
-          echo "NDK Path: ${ANDROID_NDK_HOME}" | tee -a $ENV_FILE
-          echo "NDK Version: ${{ steps.ndk-install.outputs.ndk_version }}" | tee -a $ENV_FILE
-          echo "" | tee -a $ENV_FILE
-          
-          echo "## Build Tools Versions" | tee -a $ENV_FILE
-          echo "meson: $(meson --version)" | tee -a $ENV_FILE
-          echo "ninja: $(ninja --version)" | tee -a $ENV_FILE
-          echo "cmake: $(cmake --version | head -1)" | tee -a $ENV_FILE
-          echo "automake: $(automake --version | head -1)" | tee -a $ENV_FILE
-          echo "autoconf: $(autoconf --version | head -1)" | tee -a $ENV_FILE
-          echo "libtool: $(libtool --version | head -1)" | tee -a $ENV_FILE
-          echo "pkg-config: $(pkg-config --version)" | tee -a $ENV_FILE
-          echo "nasm: $(nasm --version)" | tee -a $ENV_FILE
-          echo "" | tee -a $ENV_FILE
-          
-          echo "## Dart Version" | tee -a $ENV_FILE
-          dart --version 2>&1 | tee -a $ENV_FILE
-          echo "" | tee -a $ENV_FILE
-          
-          echo "## Python Version" | tee -a $ENV_FILE
-          python3 --version | tee -a $ENV_FILE
-          echo "" | tee -a $ENV_FILE
-          
-          echo "============================================" | tee -a $ENV_FILE
-          
-          # Store for later use
-          cp $ENV_FILE /tmp/Compile/build-environment.txt
-
-      - name: Run Android build with workspace
+      - name: Build libvips for Android
         id: build-android
         run: |
           cd /tmp/Compile
-          
-          # Set up install directory
-          INSTALL_PREFIX="/tmp/Compile/example/libvips/install"
-          mkdir -p "$INSTALL_PREFIX"
-          
-          echo "============================================"
-          echo "Starting libvips Android build using workspace"
-          echo "Install prefix: $INSTALL_PREFIX"
-          echo "ANDROID_NDK_HOME: $ANDROID_NDK_HOME"
-          echo "============================================"
-          
-          # Run the workspace build command
-          # This compiles all dependencies defined in workspace.yaml:
-          # - zlib
-          # - libffi
-          # - pcre2
-          # - expat
-          # - glib
-          # - libjpeg-turbo
-          # - libpng
-          # - libwebp
-          # - libvips
-          #
-          # Note: Using --android-cpu arm64-v8a,armeabi-v7a to skip x86/x86_64
-          # This is the same approach as the reference android.sh script in MobiPkg/Compile
-          # x86/x86_64 are skipped due to libffi assembly compatibility issues with Android NDK
-          dart run bin/compile.dart workspace -C example/libvips \
-            --android --no-ios \
-            --android-cpu arm64-v8a,armeabi-v7a \
-            --install-prefix "$INSTALL_PREFIX" \
-            --dependency-prefix "$INSTALL_PREFIX" \
-            --target libvips
-          
-          # Store exit code from dart command
-          BUILD_EXIT_CODE=$?
-          echo "build_exit_code=$BUILD_EXIT_CODE" >> $GITHUB_OUTPUT
-          echo "install_prefix=$INSTALL_PREFIX" >> $GITHUB_OUTPUT
-          
-          echo ""
-          echo "============================================"
-          echo "Build command completed with exit code: $BUILD_EXIT_CODE"
-          echo "============================================"
+          chmod +x example/libvips/build-android-with-workspace.sh
+          ./example/libvips/build-android-with-workspace.sh --clean
+        env:
+          ANDROID_NDK_HOME: ${{ env.ANDROID_NDK_HOME }}
 
-      - name: Display build output
+      - name: Verify build output
+        id: verify
         run: |
-          INSTALL_PREFIX="${{ steps.build-android.outputs.install_prefix }}"
+          INSTALL_DIR="/tmp/Compile/example/libvips/installed/android"
           
-          echo "============================================"
-          echo "Build Output - Detailed File Tree"
-          echo "============================================"
+          echo "=== Checking build output ==="
+          
+          # Check for expected architectures
+          ARCHS=("arm64-v8a" "armeabi-v7a" "x86" "x86_64")
+          MISSING_ARCHS=""
+          
+          for arch in "${ARCHS[@]}"; do
+            if [ ! -d "$INSTALL_DIR/$arch" ]; then
+              echo "❌ Missing architecture: $arch"
+              MISSING_ARCHS="$MISSING_ARCHS $arch"
+            else
+              echo "✅ Found architecture: $arch"
+            fi
+          done
+          
+          if [ -n "$MISSING_ARCHS" ]; then
+            echo "::error::Missing architectures:$MISSING_ARCHS"
+            exit 1
+          fi
+          
+          # Check for libvips.so in each architecture
+          for arch in "${ARCHS[@]}"; do
+            if [ ! -f "$INSTALL_DIR/$arch/lib/libvips.so" ]; then
+              echo "::error::Missing libvips.so for $arch"
+              exit 1
+            fi
+            echo "✅ Found libvips.so for $arch"
+          done
+          
+          # Check for include files
+          if [ ! -d "$INSTALL_DIR/arm64-v8a/include/vips" ]; then
+            echo "::error::Missing vips include directory"
+            exit 1
+          fi
+          echo "✅ Found vips include directory"
+          
+          # List all .so files
           echo ""
+          echo "=== Library files ==="
+          for arch in "${ARCHS[@]}"; do
+            echo "--- $arch ---"
+            find "$INSTALL_DIR/$arch/lib" -name "*.so" -o -name "*.a" 2>/dev/null | head -20
+          done
           
-          # Display comprehensive file tree of build outputs
-          echo "## Install Directory Tree (Full)"
-          echo "============================================"
-          if [ -d "$INSTALL_PREFIX" ]; then
-            tree -a -h --dirsfirst "$INSTALL_PREFIX" 2>/dev/null || find "$INSTALL_PREFIX" -ls
-          else
-            echo "ERROR: Install directory not found at $INSTALL_PREFIX"
-          fi
           echo ""
+          echo "=== Include files ==="
+          ls -la "$INSTALL_DIR/arm64-v8a/include/" | head -20
           
-          # Display detailed library files
-          echo "## Library Files (.so and .a)"
-          echo "============================================"
-          if [ -d "$INSTALL_PREFIX/android" ]; then
-            echo "### All library files with sizes:"
-            find "$INSTALL_PREFIX/android" -type f \( -name "*.so" -o -name "*.a" \) -ls
-            echo ""
-            
-            echo "### Library count per architecture:"
-            for arch_dir in "$INSTALL_PREFIX/android"/*; do
-              if [ -d "$arch_dir" ]; then
-                arch_name=$(basename "$arch_dir")
-                so_count=$(find "$arch_dir" -name "*.so" 2>/dev/null | wc -l)
-                a_count=$(find "$arch_dir" -name "*.a" 2>/dev/null | wc -l)
-                echo "  $arch_name: $so_count .so files, $a_count .a files"
-              fi
-            done
-          else
-            echo "No android directory found"
-          fi
-          echo ""
-          
-          # Display header files
-          echo "## Header Files (.h)"
-          echo "============================================"
-          if [ -d "$INSTALL_PREFIX" ]; then
-            find "$INSTALL_PREFIX" -name "*.h" -type f | head -50
-            header_count=$(find "$INSTALL_PREFIX" -name "*.h" -type f | wc -l)
-            echo "Total header files: $header_count"
-          fi
-          echo ""
-          
-          # Check for libvips specifically
-          echo "## libvips Build Verification"
-          echo "============================================"
-          LIBVIPS_FOUND=false
-          if [ -d "$INSTALL_PREFIX/android" ]; then
-            for arch_dir in "$INSTALL_PREFIX/android"/*; do
-              if [ -d "$arch_dir" ] && [ -d "$arch_dir/lib" ]; then
-                arch_name=$(basename "$arch_dir")
-                if find "$arch_dir/lib" -name "*vips*" -print -quit 2>/dev/null | grep -q .; then
-                  echo "✓ libvips found for $arch_name"
-                  find "$arch_dir/lib" -name "*vips*" -ls
-                  LIBVIPS_FOUND=true
-                else
-                  echo "✗ libvips NOT found for $arch_name"
-                fi
-              fi
-            done
-          fi
-          
-          if [ "$LIBVIPS_FOUND" = false ]; then
-            echo ""
-            echo "WARNING: libvips library was NOT found in build output!"
-            echo "This indicates the build may have failed for some dependencies."
-            echo "Check the build log above for errors."
-          fi
-          echo ""
-          
-          # Display pkg-config files if any
-          echo "## Package Config Files (.pc)"
-          echo "============================================"
-          if [ -d "$INSTALL_PREFIX" ]; then
-            find "$INSTALL_PREFIX" -name "*.pc" -type f 2>/dev/null | head -30
-          fi
-          echo ""
-          
-          # Display license files
-          echo "## License Files"
-          echo "============================================"
-          if [ -d "$INSTALL_PREFIX" ]; then
-            find "$INSTALL_PREFIX" -type d -name "license" -exec ls -la {} \; 2>/dev/null
-          fi
-          echo ""
-          
-          # Summary
-          echo "## Build Summary"
-          echo "============================================"
-          echo "Install prefix: $INSTALL_PREFIX"
-          echo "Build exit code: ${{ steps.build-android.outputs.build_exit_code }}"
-          if [ -d "$INSTALL_PREFIX/android" ]; then
-            total_so=$(find "$INSTALL_PREFIX/android" -name "*.so" | wc -l)
-            total_a=$(find "$INSTALL_PREFIX/android" -name "*.a" | wc -l)
-            echo "Total .so files: $total_so"
-            echo "Total .a files: $total_a"
-          fi
-          echo "============================================"
+          echo "install_dir=$INSTALL_DIR" >> $GITHUB_OUTPUT
 
-      - name: Create jniLibs structure
-        id: create-jnilibs
+      - name: Prepare artifacts
+        id: prepare-artifacts
         run: |
-          INSTALL_PREFIX="${{ steps.build-android.outputs.install_prefix }}"
-          PACKAGE_DIR="/tmp/package"
+          INSTALL_DIR="${{ steps.verify.outputs.install_dir }}"
+          ARTIFACT_DIR="/tmp/libvips-android-artifacts"
           
-          mkdir -p "$PACKAGE_DIR/jniLibs"
+          mkdir -p "$ARTIFACT_DIR"
           
-          # Map architecture directory names to Android ABI names
-          # MobiPkg may output either Android ABI names directly (arm64-v8a, armeabi-v7a)
-          # or architecture names (arm64, armv7a) depending on the version/configuration.
-          # This mapping handles both cases for compatibility.
-          #
-          # Note: Currently building only ARM architectures (arm64-v8a, armeabi-v7a)
-          # x86/x86_64 are skipped due to libffi assembly compatibility issues
+          # Copy libraries for each architecture
+          for arch in arm64-v8a armeabi-v7a x86 x86_64; do
+            mkdir -p "$ARTIFACT_DIR/jniLibs/$arch"
+            # Copy all .so files
+            find "$INSTALL_DIR/$arch/lib" -name "*.so" -exec cp {} "$ARTIFACT_DIR/jniLibs/$arch/" \;
+          done
           
-          if [ -d "$INSTALL_PREFIX/android" ]; then
-            # Find and copy libraries for each architecture
-            for arch_dir in "$INSTALL_PREFIX/android"/*; do
-              if [ -d "$arch_dir" ]; then
-                arch_name=$(basename "$arch_dir")
-                
-                # Map architecture names
-                case "$arch_name" in
-                  arm64|aarch64|arm64-v8a)
-                    abi_name="arm64-v8a"
-                    ;;
-                  armv7a|arm|armv7|armeabi-v7a)
-                    abi_name="armeabi-v7a"
-                    ;;
-                  x86)
-                    abi_name="x86"
-                    ;;
-                  x86_64)
-                    abi_name="x86_64"
-                    ;;
-                  *)
-                    echo "Unknown architecture: $arch_name, skipping..."
-                    continue
-                    ;;
-                esac
-                
-                mkdir -p "$PACKAGE_DIR/jniLibs/$abi_name"
-                
-                # Copy .so files (shared libraries)
-                if [ -d "$arch_dir/lib" ]; then
-                  so_count=$(find "$arch_dir/lib" -maxdepth 1 -name "*.so" 2>/dev/null | wc -l)
-                  if [ "$so_count" -gt 0 ]; then
-                    cp "$arch_dir/lib"/*.so "$PACKAGE_DIR/jniLibs/$abi_name/"
-                    echo "  Copied $so_count .so files for $abi_name"
-                  else
-                    echo "  No .so files found for $abi_name"
-                  fi
-                fi
-                
-                # Copy .a files (static libraries)
-                if [ -d "$arch_dir/lib" ]; then
-                  a_count=$(find "$arch_dir/lib" -maxdepth 1 -name "*.a" 2>/dev/null | wc -l)
-                  if [ "$a_count" -gt 0 ]; then
-                    cp "$arch_dir/lib"/*.a "$PACKAGE_DIR/jniLibs/$abi_name/"
-                    echo "  Copied $a_count .a files for $abi_name"
-                  else
-                    echo "  No .a files found for $abi_name"
-                  fi
-                fi
-                
-                echo "Copied libraries for $arch_name -> $abi_name"
-              fi
-            done
-            
-            # Copy headers from first available architecture
-            for arch_dir in "$INSTALL_PREFIX/android"/*; do
-              if [ -d "$arch_dir/include" ]; then
-                cp -r "$arch_dir/include" "$PACKAGE_DIR/jniLibs/"
-                echo "Copied headers from $(basename "$arch_dir")"
-                break
-              fi
-            done
+          # Copy include files (use arm64-v8a as reference, they should be the same)
+          cp -r "$INSTALL_DIR/arm64-v8a/include" "$ARTIFACT_DIR/"
+          
+          # Copy glibconfig.h from lib/glib-2.0/include/ (architecture-specific glib header)
+          # This file is required for compiling against glib
+          if [ -f "$INSTALL_DIR/arm64-v8a/lib/glib-2.0/include/glibconfig.h" ]; then
+            mkdir -p "$ARTIFACT_DIR/include/glib-2.0"
+            cp "$INSTALL_DIR/arm64-v8a/lib/glib-2.0/include/glibconfig.h" "$ARTIFACT_DIR/include/glib-2.0/"
+            echo "✅ Copied glibconfig.h"
+          else
+            echo "::warning::glibconfig.h not found in expected location"
+            # Try to find it
+            find "$INSTALL_DIR" -name "glibconfig.h" 2>/dev/null || echo "glibconfig.h not found anywhere"
           fi
           
-          # Copy build environment info
-          cp /tmp/Compile/build-environment.txt "$PACKAGE_DIR/jniLibs/"
+          # Create a summary file
+          echo "libvips Android Build" > "$ARTIFACT_DIR/BUILD_INFO.txt"
+          echo "=====================" >> "$ARTIFACT_DIR/BUILD_INFO.txt"
+          echo "Build Date: $(date -u)" >> "$ARTIFACT_DIR/BUILD_INFO.txt"
+          echo "Commit: ${{ github.sha }}" >> "$ARTIFACT_DIR/BUILD_INFO.txt"
+          echo "" >> "$ARTIFACT_DIR/BUILD_INFO.txt"
+          echo "Architectures:" >> "$ARTIFACT_DIR/BUILD_INFO.txt"
+          for arch in arm64-v8a armeabi-v7a x86 x86_64; do
+            echo "  - $arch" >> "$ARTIFACT_DIR/BUILD_INFO.txt"
+          done
+          echo "" >> "$ARTIFACT_DIR/BUILD_INFO.txt"
+          echo "Libraries included:" >> "$ARTIFACT_DIR/BUILD_INFO.txt"
+          ls "$ARTIFACT_DIR/jniLibs/arm64-v8a/" >> "$ARTIFACT_DIR/BUILD_INFO.txt"
           
-          echo ""
-          echo "============================================"
-          echo "jniLibs Package Structure (File Tree)"
-          echo "============================================"
-          tree -a -h --dirsfirst "$PACKAGE_DIR/jniLibs" 2>/dev/null || find "$PACKAGE_DIR/jniLibs" -ls
+          echo "=== Artifact structure ==="
+          find "$ARTIFACT_DIR" -type f | head -50
           
-          echo ""
-          echo "============================================"
-          echo "jniLibs Package Summary"
-          echo "============================================"
-          find "$PACKAGE_DIR/jniLibs" -type f | wc -l | xargs -I {} echo "Total files in package: {}"
-          
-          echo "package_dir=$PACKAGE_DIR" >> $GITHUB_OUTPUT
+          echo "artifact_dir=$ARTIFACT_DIR" >> $GITHUB_OUTPUT
 
-      - name: Package build artifacts
+      - name: Upload Android artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: libvips-android-${{ steps.build-info.outputs.build_tag }}
+          path: ${{ steps.prepare-artifacts.outputs.artifact_dir }}/
+          retention-days: 30
+
+      - name: Verify uploaded artifacts
+        run: |
+          echo "=== Final verification ==="
+          ARTIFACT_DIR="${{ steps.prepare-artifacts.outputs.artifact_dir }}"
+          
+          # Count .so files per architecture
+          for arch in arm64-v8a armeabi-v7a x86 x86_64; do
+            COUNT=$(find "$ARTIFACT_DIR/jniLibs/$arch" -name "*.so" | wc -l)
+            echo "$arch: $COUNT .so files"
+            if [ "$COUNT" -lt 5 ]; then
+              echo "::warning::Low number of libraries for $arch (expected at least 5)"
+            fi
+          done
+          
+          # Verify key libraries exist
+          KEY_LIBS=("libvips.so" "libglib-2.0.so" "libgobject-2.0.so")
+          for lib in "${KEY_LIBS[@]}"; do
+            if [ ! -f "$ARTIFACT_DIR/jniLibs/arm64-v8a/$lib" ]; then
+              echo "::warning::Key library missing: $lib"
+            else
+              echo "✅ Found key library: $lib"
+            fi
+          done
+          
+          # Verify include files
+          if [ -f "$ARTIFACT_DIR/include/vips/vips.h" ]; then
+            echo "✅ Found vips.h header"
+          else
+            echo "::warning::vips.h header not found"
+          fi
+          
+          # Verify glibconfig.h
+          if [ -f "$ARTIFACT_DIR/include/glib-2.0/glibconfig.h" ]; then
+            echo "✅ Found glibconfig.h header"
+          else
+            echo "::error::glibconfig.h header not found - required for glib compilation"
+            exit 1
+          fi
+
+      - name: Package build artifacts for release
         id: package
         run: |
           BUILD_TAG="${{ steps.build-info.outputs.build_tag }}"
-          PACKAGE_DIR="${{ steps.create-jnilibs.outputs.package_dir }}"
+          ARTIFACT_DIR="${{ steps.prepare-artifacts.outputs.artifact_dir }}"
           
           echo "============================================"
           echo "Creating Package Archive"
           echo "============================================"
           
           # Create compressed archive
-          cd "$PACKAGE_DIR"
+          cd "$ARTIFACT_DIR"
           ARCHIVE_NAME="libvips-android-mobipkg-${BUILD_TAG}.tar.xz"
-          tar -cJf "/tmp/${ARCHIVE_NAME}" jniLibs
+          tar -cJf "/tmp/${ARCHIVE_NAME}" jniLibs include BUILD_INFO.txt
           
           echo "archive_path=/tmp/${ARCHIVE_NAME}" >> $GITHUB_OUTPUT
           echo "archive_name=${ARCHIVE_NAME}" >> $GITHUB_OUTPUT
@@ -507,13 +277,6 @@ jobs:
           echo ""
           TOTAL_ENTRIES=$(tar -tf "/tmp/${ARCHIVE_NAME}" | wc -l)
           echo "Total entries in archive: $TOTAL_ENTRIES"
-
-      - name: Upload build artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: libvips-android-mobipkg-${{ steps.build-info.outputs.build_tag }}
-          path: ${{ steps.package.outputs.archive_path }}
-          retention-days: 30
 
       - name: Generate release notes
         id: release-notes
@@ -589,14 +352,12 @@ jobs:
           |------|---------|-----------------|
           RELEASE_EOF2
           
-          echo "| meson | $(meson --version) | \`sudo apt-get install meson\` |" >> /tmp/release-notes.md
+          echo "| meson | $(meson --version) | \`pip3 install meson\` |" >> /tmp/release-notes.md
           echo "| ninja | $(ninja --version) | \`sudo apt-get install ninja-build\` |" >> /tmp/release-notes.md
-          echo "| cmake | $(cmake --version | head -1 | awk '{print $3}') | \`sudo apt-get install cmake\` |" >> /tmp/release-notes.md
           echo "| automake | $(automake --version | head -1 | awk '{print $NF}') | \`sudo apt-get install automake\` |" >> /tmp/release-notes.md
           echo "| autoconf | $(autoconf --version | head -1 | awk '{print $NF}') | \`sudo apt-get install autoconf\` |" >> /tmp/release-notes.md
           echo "| libtool | $(libtool --version | head -1 | awk '{print $NF}') | \`sudo apt-get install libtool\` |" >> /tmp/release-notes.md
           echo "| pkg-config | $(pkg-config --version) | \`sudo apt-get install pkg-config\` |" >> /tmp/release-notes.md
-          echo "| nasm | $(nasm --version | awk '{print $3}') | \`sudo apt-get install nasm\` |" >> /tmp/release-notes.md
           echo "| Dart SDK | $(dart --version 2>&1 | awk '{print $4}') | \`dart-lang/setup-dart@v1\` |" >> /tmp/release-notes.md
           echo "| Python | $(python3 --version | awk '{print $2}') | System |" >> /tmp/release-notes.md
           
@@ -611,18 +372,19 @@ jobs:
           sudo apt-get update
           
           # Install system dependencies
-          # Note: libtool-bin is required for libffi's autogen.sh
           sudo apt-get install -y \
-            meson \
-            ninja-build \
-            automake \
             autoconf \
+            automake \
             libtool \
-            libtool-bin \
             pkg-config \
-            nasm \
-            cmake \
+            gettext \
+            libglib2.0-dev \
+            python3-pip \
+            ninja-build \
             xz-utils
+          
+          # Install meson via pip
+          pip3 install meson
           
           # Install Dart SDK
           sudo apt-get install -y apt-transport-https
@@ -642,10 +404,8 @@ jobs:
           |-------------|-------------|-------------|--------|
           | arm64 | arm64-v8a | 64-bit ARM devices | ✓ Built |
           | armv7a | armeabi-v7a | 32-bit ARM devices | ✓ Built |
-          | x86 | x86 | 32-bit x86 emulator | ✗ Skipped |
-          | x86_64 | x86_64 | 64-bit x86 emulator | ✗ Skipped |
-          
-          > **Note**: x86 and x86_64 architectures are skipped due to libffi assembly compatibility issues with Android NDK.
+          | x86 | x86 | 32-bit x86 emulator | ✓ Built |
+          | x86_64 | x86_64 | 64-bit x86 emulator | ✓ Built |
           
           ## Included Libraries
           
