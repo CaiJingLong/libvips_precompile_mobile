@@ -144,6 +144,7 @@ jobs:
           # Copy glibconfig.h from lib/glib-2.0/include/ (architecture-specific glib header)
           # This file is required for compiling against glib
           if [ -f "$INSTALL_DIR/arm64-v8a/lib/glib-2.0/include/glibconfig.h" ]; then
+            mkdir -p "$ARTIFACT_DIR/include/glib-2.0"
             cp "$INSTALL_DIR/arm64-v8a/lib/glib-2.0/include/glibconfig.h" "$ARTIFACT_DIR/include/glib-2.0/"
             echo "✅ Copied glibconfig.h"
           else
