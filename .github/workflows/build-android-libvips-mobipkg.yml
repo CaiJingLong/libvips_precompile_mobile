@@ -17,8 +17,6 @@ jobs:
     outputs:
       build_date: ${{ steps.build-info.outputs.build_date }}
       build_tag: ${{ steps.build-info.outputs.build_tag }}
-      mobipkg_ref: ${{ steps.clone-mobipkg.outputs.mobipkg_ref }}
-      mobipkg_commit: ${{ steps.clone-mobipkg.outputs.mobipkg_commit }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -52,47 +50,22 @@ jobs:
             gettext \
             libglib2.0-dev \
             python3-pip \
-            ninja-build \
-            xz-utils \
-            tree
+            ninja-build
           pip3 install meson
 
       - name: Setup Android NDK
         uses: android-actions/setup-android@v3
 
-      - name: Install Android NDK
-        id: ndk-install
+      - name: Install NDK
         run: |
-          sdkmanager --install "ndk;27.0.12077973"
-          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/27.0.12077973" >> $GITHUB_ENV
-          echo "ndk_version=27.0.12077973" >> $GITHUB_OUTPUT
-
-      - name: Clone MobiPkg/Compile
-        id: clone-mobipkg
-        run: |
-          git clone https://github.com/MobiPkg/Compile.git /tmp/Compile
-          cd /tmp/Compile
-          
-          MOBIPKG_COMMIT=$(git rev-parse HEAD)
-          MOBIPKG_SHORT_COMMIT=$(git rev-parse --short HEAD)
-          MOBIPKG_REF="main"
-          
-          echo "mobipkg_ref=${MOBIPKG_REF}" >> $GITHUB_OUTPUT
-          echo "mobipkg_commit=${MOBIPKG_COMMIT}" >> $GITHUB_OUTPUT
-          echo "mobipkg_short_commit=${MOBIPKG_SHORT_COMMIT}" >> $GITHUB_OUTPUT
-          
-          echo "MobiPkg/Compile ref: ${MOBIPKG_REF}"
-          echo "MobiPkg/Compile commit: ${MOBIPKG_COMMIT}"
+          sdkmanager --install "ndk;29.0.14206865"
+          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/29.0.14206865" >> $GITHUB_ENV
 
       - name: Get Dart dependencies
-        run: |
-          cd /tmp/Compile
-          dart pub get
+        run: dart pub get
 
       - name: Build libvips for Android
-        id: build-android
         run: |
-          cd /tmp/Compile
           chmod +x example/libvips/build-android-with-workspace.sh
           ./example/libvips/build-android-with-workspace.sh --clean
         env:
@@ -101,7 +74,7 @@ jobs:
       - name: Verify build output
         id: verify
         run: |
-          INSTALL_DIR="/tmp/Compile/example/libvips/installed/android"
+          INSTALL_DIR="example/libvips/installed/android"
           
           echo "=== Checking build output ==="
           
@@ -150,14 +123,11 @@ jobs:
           echo ""
           echo "=== Include files ==="
           ls -la "$INSTALL_DIR/arm64-v8a/include/" | head -20
-          
-          echo "install_dir=$INSTALL_DIR" >> $GITHUB_OUTPUT
 
       - name: Prepare artifacts
-        id: prepare-artifacts
         run: |
-          INSTALL_DIR="${{ steps.verify.outputs.install_dir }}"
-          ARTIFACT_DIR="/tmp/libvips-android-artifacts"
+          INSTALL_DIR="example/libvips/installed/android"
+          ARTIFACT_DIR="libvips-android-artifacts"
           
           mkdir -p "$ARTIFACT_DIR"
           
@@ -199,20 +169,18 @@ jobs:
           
           echo "=== Artifact structure ==="
           find "$ARTIFACT_DIR" -type f | head -50
-          
-          echo "artifact_dir=$ARTIFACT_DIR" >> $GITHUB_OUTPUT
 
       - name: Upload Android artifacts
         uses: actions/upload-artifact@v4
         with:
           name: libvips-android-${{ steps.build-info.outputs.build_tag }}
-          path: ${{ steps.prepare-artifacts.outputs.artifact_dir }}/
+          path: libvips-android-artifacts/
           retention-days: 30
 
       - name: Verify uploaded artifacts
         run: |
           echo "=== Final verification ==="
-          ARTIFACT_DIR="${{ steps.prepare-artifacts.outputs.artifact_dir }}"
+          ARTIFACT_DIR="libvips-android-artifacts"
           
           # Count .so files per architecture
           for arch in arm64-v8a armeabi-v7a x86 x86_64; do
@@ -283,9 +251,7 @@ jobs:
         run: |
           BUILD_TAG="${{ steps.build-info.outputs.build_tag }}"
           BUILD_TIME="${{ steps.build-info.outputs.build_time }}"
-          MOBIPKG_REF="${{ steps.clone-mobipkg.outputs.mobipkg_ref }}"
-          MOBIPKG_COMMIT="${{ steps.clone-mobipkg.outputs.mobipkg_commit }}"
-          NDK_VERSION="${{ steps.ndk-install.outputs.ndk_version }}"
+          NDK_VERSION="29.0.14206865"
           
           cat << RELEASE_EOF > /tmp/release-notes.md
           # Android libvips Build (MobiPkg) - ${BUILD_TAG}
@@ -308,14 +274,6 @@ jobs:
           - **Commit**: [${{ github.sha }}](https://github.com/${{ github.repository }}/commit/${{ github.sha }})
           - **Workflow File**: [build-android-libvips-mobipkg.yml](https://github.com/${{ github.repository }}/blob/${{ github.sha }}/.github/workflows/build-android-libvips-mobipkg.yml)
           - **Workflow Run**: [Run #${{ github.run_number }}](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})
-          
-          ### MobiPkg/Compile (Build System)
-          - **Repository**: [MobiPkg/Compile](https://github.com/MobiPkg/Compile)
-          - **Branch/Ref**: \`${MOBIPKG_REF}\`
-          - **Commit SHA**: [\`${MOBIPKG_COMMIT}\`](https://github.com/MobiPkg/Compile/commit/${MOBIPKG_COMMIT})
-          - **Build Script**: [build-android-with-workspace.sh](https://github.com/MobiPkg/Compile/blob/${MOBIPKG_COMMIT}/example/libvips/build-android-with-workspace.sh)
-          - **Workspace Config**: [workspace.yaml](https://github.com/MobiPkg/Compile/blob/${MOBIPKG_COMMIT}/example/libvips/workspace.yaml)
-          - **libvips Config**: [lib.yaml](https://github.com/MobiPkg/Compile/blob/${MOBIPKG_COMMIT}/example/libvips/libvips/lib.yaml)
           
           ## GitHub Actions Used
           
