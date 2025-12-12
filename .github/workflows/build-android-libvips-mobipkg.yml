@@ -244,7 +244,7 @@ jobs:
         id: package
         run: |
           BUILD_TAG="${{ steps.build-info.outputs.build_tag }}"
-          ARTIFACT_DIR="${{ steps.prepare-artifacts.outputs.artifact_dir }}"
+          ARTIFACT_DIR="libvips-android-artifacts"
           
           echo "============================================"
           echo "Creating Package Archive"
