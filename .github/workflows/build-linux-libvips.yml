@@ -1,0 +1,279 @@
+name: Build Linux libvips (Desktop)
+
+on:
+  workflow_dispatch:
+
+# This workflow extracts pre-built libvips libraries using Homebrew (Linuxbrew)
+# Supports x86_64 and arm64 architectures
+
+jobs:
+  build-linux:
+    strategy:
+      matrix:
+        include:
+          - runner: ubuntu-24.04  # x86_64
+            arch: x86_64
+          - runner: ubuntu-24.04-arm  # arm64
+            arch: arm64
+    runs-on: ${{ matrix.runner }}
+    permissions:
+      contents: write
+    outputs:
+      build_date: ${{ steps.build-info.outputs.build_date }}
+      build_tag: ${{ steps.build-info.outputs.build_tag }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Generate build information
+        id: build-info
+        run: |
+          BUILD_DATE=$(date -u +"%Y-%m-%d")
+          BUILD_TAG="linux-${{ matrix.arch }}-${BUILD_DATE}-${{ github.run_number }}"
+          BUILD_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+          echo "build_date=${BUILD_DATE}" >> $GITHUB_OUTPUT
+          echo "build_tag=${BUILD_TAG}" >> $GITHUB_OUTPUT
+          echo "build_time=${BUILD_TIME}" >> $GITHUB_OUTPUT
+          echo "Build Date: ${BUILD_DATE}"
+          echo "Build Tag: ${BUILD_TAG}"
+          echo "Build Time: ${BUILD_TIME}"
+
+      - name: Install Homebrew
+        id: install-brew
+        run: |
+          echo "============================================"
+          echo "Installing Homebrew (Linuxbrew)"
+          echo "============================================"
+          
+          # Install build dependencies
+          sudo apt-get update
+          sudo apt-get install -y build-essential curl git patchelf
+          
+          # Install Homebrew
+          NONINTERACTIVE=1 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+          
+          # Add Homebrew to PATH
+          if [ -d "/home/linuxbrew/.linuxbrew" ]; then
+            BREW_PREFIX="/home/linuxbrew/.linuxbrew"
+          else
+            BREW_PREFIX="$HOME/.linuxbrew"
+          fi
+          
+          echo "${BREW_PREFIX}/bin" >> $GITHUB_PATH
+          echo "HOMEBREW_PREFIX=${BREW_PREFIX}" >> $GITHUB_ENV
+          
+          # Verify installation
+          eval "$(${BREW_PREFIX}/bin/brew shellenv)"
+          brew --version
+          
+          echo "brew_prefix=${BREW_PREFIX}" >> $GITHUB_OUTPUT
+
+      - name: Install libvips via Homebrew
+        id: install-vips
+        run: |
+          echo "============================================"
+          echo "Installing libvips via Homebrew"
+          echo "============================================"
+          
+          # Install libvips
+          brew install vips
+          
+          # Get version information
+          VIPS_VERSION=$(brew info --json=v2 vips | python3 -c "import sys, json; print(json.load(sys.stdin)['formulae'][0]['versions']['stable'])")
+          echo "vips_version=${VIPS_VERSION}" >> $GITHUB_OUTPUT
+          
+          echo "libvips version: ${VIPS_VERSION}"
+          echo "Homebrew prefix: $(brew --prefix)"
+          echo "libvips prefix: $(brew --prefix vips)"
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Extract libraries
+        id: extract
+        run: |
+          OUTPUT_DIR="${{ github.workspace }}/output/linux-${{ matrix.arch }}"
+          mkdir -p "$OUTPUT_DIR"
+          
+          echo "============================================"
+          echo "Extracting libvips libraries"
+          echo "============================================"
+          
+          python3 tools/copy_libvips_linux.py \
+            --output "$OUTPUT_DIR" \
+            --include-headers \
+            --verbose
+          
+          echo "output_dir=${OUTPUT_DIR}" >> $GITHUB_OUTPUT
+
+      - name: Collect build environment information
+        run: |
+          OUTPUT_DIR="${{ steps.extract.outputs.output_dir }}"
+          ENV_FILE="${OUTPUT_DIR}/build-environment.txt"
+          
+          echo "============================================" | tee "$ENV_FILE"
+          echo "Build Environment Information" | tee -a "$ENV_FILE"
+          echo "============================================" | tee -a "$ENV_FILE"
+          echo "" | tee -a "$ENV_FILE"
+          
+          echo "## System Information" | tee -a "$ENV_FILE"
+          echo "Machine architecture: $(uname -m)" | tee -a "$ENV_FILE"
+          echo "Kernel: $(uname -sr)" | tee -a "$ENV_FILE"
+          echo "" | tee -a "$ENV_FILE"
+          
+          echo "## Linux Distribution" | tee -a "$ENV_FILE"
+          cat /etc/os-release | tee -a "$ENV_FILE"
+          echo "" | tee -a "$ENV_FILE"
+          
+          echo "## Homebrew Information" | tee -a "$ENV_FILE"
+          echo "Homebrew prefix: $(brew --prefix)" | tee -a "$ENV_FILE"
+          echo "libvips version: ${{ steps.install-vips.outputs.vips_version }}" | tee -a "$ENV_FILE"
+          echo "" | tee -a "$ENV_FILE"
+          
+          echo "============================================" | tee -a "$ENV_FILE"
+
+      - name: Display output
+        run: |
+          OUTPUT_DIR="${{ steps.extract.outputs.output_dir }}"
+          
+          echo "============================================"
+          echo "Output Directory Contents"
+          echo "============================================"
+          
+          echo "Directory structure:"
+          find "$OUTPUT_DIR" -type f | head -50
+          
+          echo ""
+          echo "Library files:"
+          ls -la "$OUTPUT_DIR/lib/"*.so* 2>/dev/null | head -20 || echo "No .so files found"
+
+      - name: Package build artifacts
+        id: package
+        run: |
+          BUILD_TAG="${{ steps.build-info.outputs.build_tag }}"
+          OUTPUT_DIR="${{ steps.extract.outputs.output_dir }}"
+          
+          echo "============================================"
+          echo "Creating Package Archive"
+          echo "============================================"
+          
+          cd "$OUTPUT_DIR"
+          ARCHIVE_NAME="libvips-${BUILD_TAG}.tar.xz"
+          tar -cJf "/tmp/${ARCHIVE_NAME}" .
+          
+          echo "archive_path=/tmp/${ARCHIVE_NAME}" >> $GITHUB_OUTPUT
+          echo "archive_name=${ARCHIVE_NAME}" >> $GITHUB_OUTPUT
+          
+          echo "Created archive: ${ARCHIVE_NAME}"
+          ls -lh "/tmp/${ARCHIVE_NAME}"
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: libvips-linux-${{ matrix.arch }}-${{ steps.build-info.outputs.build_tag }}
+          path: ${{ steps.package.outputs.archive_path }}
+          retention-days: 30
+
+      - name: Generate release notes
+        id: release-notes
+        run: |
+          BUILD_TAG="${{ steps.build-info.outputs.build_tag }}"
+          BUILD_TIME="${{ steps.build-info.outputs.build_time }}"
+          VIPS_VERSION="${{ steps.install-vips.outputs.vips_version }}"
+          
+          cat << RELEASE_EOF > /tmp/release-notes.md
+          # Linux libvips (${{ matrix.arch }}) - ${BUILD_TAG}
+          
+          ## Build Information
+          
+          | Item | Value |
+          |------|-------|
+          | **Build Date** | ${{ steps.build-info.outputs.build_date }} |
+          | **Build Time (UTC)** | ${BUILD_TIME} |
+          | **Build Tag** | ${BUILD_TAG} |
+          | **libvips Version** | ${VIPS_VERSION} |
+          | **Architecture** | ${{ matrix.arch }} |
+          | **GitHub Run ID** | ${{ github.run_id }} |
+          | **GitHub Run Number** | ${{ github.run_number }} |
+          
+          ## Source References
+          
+          ### This Repository
+          - **Repository**: [${{ github.repository }}](https://github.com/${{ github.repository }})
+          - **Commit**: [${{ github.sha }}](https://github.com/${{ github.repository }}/commit/${{ github.sha }})
+          - **Workflow File**: [build-linux-libvips.yml](https://github.com/${{ github.repository }}/blob/${{ github.sha }}/.github/workflows/build-linux-libvips.yml)
+          - **Workflow Run**: [Run #${{ github.run_number }}](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})
+          
+          ### Package Source
+          - **Package Manager**: Homebrew (Linuxbrew)
+          - **Formula**: [vips](https://formulae.brew.sh/formula/vips)
+          - **Version**: ${VIPS_VERSION}
+          
+          ## GitHub Actions Used
+          
+          | Action | Version |
+          |--------|---------|
+          | actions/checkout | v4 |
+          | actions/setup-python | v5 |
+          | actions/upload-artifact | v4 |
+          | softprops/action-gh-release | v2 |
+          
+          ## Build Environment
+          
+          ### System
+          - **Runner**: \`${{ matrix.runner }}\`
+          - **Architecture**: ${{ matrix.arch }}
+          
+          ### Linux Distribution
+          RELEASE_EOF
+          
+          echo '```' >> /tmp/release-notes.md
+          cat /etc/os-release >> /tmp/release-notes.md
+          echo '```' >> /tmp/release-notes.md
+          
+          cat << 'RELEASE_EOF2' >> /tmp/release-notes.md
+          
+          ## How to Use
+          
+          1. Download \`libvips-linux-*.tar.xz\` from this release
+          2. Extract: \`tar -xvf libvips-linux-*.tar.xz\`
+          3. The \`lib/\` directory contains shared libraries (\`.so\` files)
+          4. The \`include/\` directory contains header files
+          5. Libraries have RPATH set to \`$ORIGIN\` for easy redistribution
+          
+          ### Using with your project
+          
+          ```bash
+          # Extract the archive
+          tar -xvf libvips-linux-*.tar.xz -C /path/to/your/project/libs
+          
+          # Set RPATH when compiling/linking
+          g++ -o your_app your_app.cpp \
+            -I/path/to/your/project/libs/include \
+            -L/path/to/your/project/libs/lib \
+            -lvips \
+            -Wl,-rpath,'$ORIGIN/libs/lib'
+          
+          # Or set LD_LIBRARY_PATH at runtime
+          export LD_LIBRARY_PATH=/path/to/your/project/libs/lib:$LD_LIBRARY_PATH
+          ./your_app
+          ```
+          
+          RELEASE_EOF2
+          
+          echo "Release notes generated"
+          cat /tmp/release-notes.md
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.build-info.outputs.build_tag }}
+          name: Linux libvips (${{ matrix.arch }}) - ${{ steps.build-info.outputs.build_tag }}
+          body_path: /tmp/release-notes.md
+          draft: false
+          prerelease: false
+          files: ${{ steps.package.outputs.archive_path }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

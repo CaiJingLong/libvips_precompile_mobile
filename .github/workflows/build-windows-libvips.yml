@@ -1,0 +1,239 @@
+name: Build Windows libvips (Desktop)
+
+on:
+  workflow_dispatch:
+
+# This workflow downloads pre-built libvips binaries from the official
+# libvips/build-win64-mxe repository for Windows
+# Supports x64 and arm64 architectures
+
+jobs:
+  build-windows:
+    strategy:
+      matrix:
+        include:
+          - runner: windows-2022  # x64
+            arch: x64
+          - runner: windows-11-arm  # arm64
+            arch: arm64
+    runs-on: ${{ matrix.runner }}
+    permissions:
+      contents: write
+    outputs:
+      build_date: ${{ steps.build-info.outputs.build_date }}
+      build_tag: ${{ steps.build-info.outputs.build_tag }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Generate build information
+        id: build-info
+        shell: bash
+        run: |
+          BUILD_DATE=$(date -u +"%Y-%m-%d")
+          BUILD_TAG="windows-${{ matrix.arch }}-${BUILD_DATE}-${{ github.run_number }}"
+          BUILD_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+          echo "build_date=${BUILD_DATE}" >> $GITHUB_OUTPUT
+          echo "build_tag=${BUILD_TAG}" >> $GITHUB_OUTPUT
+          echo "build_time=${BUILD_TIME}" >> $GITHUB_OUTPUT
+          echo "Build Date: ${BUILD_DATE}"
+          echo "Build Tag: ${BUILD_TAG}"
+          echo "Build Time: ${BUILD_TIME}"
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Download and extract libvips
+        id: extract
+        shell: bash
+        run: |
+          OUTPUT_DIR="${{ github.workspace }}/output/windows-${{ matrix.arch }}"
+          mkdir -p "$OUTPUT_DIR"
+          
+          echo "============================================"
+          echo "Downloading libvips for Windows ${{ matrix.arch }}"
+          echo "============================================"
+          
+          python3 tools/copy_libvips_windows.py \
+            --output "$OUTPUT_DIR" \
+            --arch ${{ matrix.arch }} \
+            --verbose
+          
+          # Read version from VERSION.txt
+          VIPS_VERSION=$(grep "libvips version:" "$OUTPUT_DIR/VERSION.txt" | cut -d: -f2 | tr -d ' ')
+          echo "vips_version=${VIPS_VERSION}" >> $GITHUB_OUTPUT
+          echo "output_dir=${OUTPUT_DIR}" >> $GITHUB_OUTPUT
+
+      - name: Collect build environment information
+        shell: bash
+        run: |
+          OUTPUT_DIR="${{ steps.extract.outputs.output_dir }}"
+          ENV_FILE="${OUTPUT_DIR}/build-environment.txt"
+          
+          echo "============================================" | tee "$ENV_FILE"
+          echo "Build Environment Information" | tee -a "$ENV_FILE"
+          echo "============================================" | tee -a "$ENV_FILE"
+          echo "" | tee -a "$ENV_FILE"
+          
+          echo "## System Information" | tee -a "$ENV_FILE"
+          echo "OS: Windows" | tee -a "$ENV_FILE"
+          echo "Architecture: ${{ matrix.arch }}" | tee -a "$ENV_FILE"
+          echo "Runner: ${{ matrix.runner }}" | tee -a "$ENV_FILE"
+          echo "" | tee -a "$ENV_FILE"
+          
+          echo "## libvips Information" | tee -a "$ENV_FILE"
+          cat "${OUTPUT_DIR}/VERSION.txt" | tee -a "$ENV_FILE"
+          echo "" | tee -a "$ENV_FILE"
+          
+          echo "============================================" | tee -a "$ENV_FILE"
+
+      - name: Display output
+        shell: bash
+        run: |
+          OUTPUT_DIR="${{ steps.extract.outputs.output_dir }}"
+          
+          echo "============================================"
+          echo "Output Directory Contents"
+          echo "============================================"
+          
+          echo "Directory structure:"
+          find "$OUTPUT_DIR" -type f | head -50
+          
+          echo ""
+          echo "DLL files:"
+          ls -la "$OUTPUT_DIR/bin/"*.dll 2>/dev/null | head -20 || echo "No DLL files found"
+
+      - name: Package build artifacts
+        id: package
+        shell: bash
+        run: |
+          BUILD_TAG="${{ steps.build-info.outputs.build_tag }}"
+          OUTPUT_DIR="${{ steps.extract.outputs.output_dir }}"
+          
+          echo "============================================"
+          echo "Creating Package Archive"
+          echo "============================================"
+          
+          cd "$OUTPUT_DIR"
+          ARCHIVE_NAME="libvips-${BUILD_TAG}.zip"
+          
+          # Use zip for Windows compatibility
+          7z a -tzip "/tmp/${ARCHIVE_NAME}" .
+          
+          echo "archive_path=/tmp/${ARCHIVE_NAME}" >> $GITHUB_OUTPUT
+          echo "archive_name=${ARCHIVE_NAME}" >> $GITHUB_OUTPUT
+          
+          echo "Created archive: ${ARCHIVE_NAME}"
+          ls -lh "/tmp/${ARCHIVE_NAME}"
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: libvips-windows-${{ matrix.arch }}-${{ steps.build-info.outputs.build_tag }}
+          path: ${{ steps.package.outputs.archive_path }}
+          retention-days: 30
+
+      - name: Generate release notes
+        id: release-notes
+        shell: bash
+        run: |
+          BUILD_TAG="${{ steps.build-info.outputs.build_tag }}"
+          BUILD_TIME="${{ steps.build-info.outputs.build_time }}"
+          VIPS_VERSION="${{ steps.extract.outputs.vips_version }}"
+          
+          cat << RELEASE_EOF > /tmp/release-notes.md
+          # Windows libvips (${{ matrix.arch }}) - ${BUILD_TAG}
+          
+          ## Build Information
+          
+          | Item | Value |
+          |------|-------|
+          | **Build Date** | ${{ steps.build-info.outputs.build_date }} |
+          | **Build Time (UTC)** | ${BUILD_TIME} |
+          | **Build Tag** | ${BUILD_TAG} |
+          | **libvips Version** | ${VIPS_VERSION} |
+          | **Architecture** | ${{ matrix.arch }} |
+          | **GitHub Run ID** | ${{ github.run_id }} |
+          | **GitHub Run Number** | ${{ github.run_number }} |
+          
+          ## Source References
+          
+          ### This Repository
+          - **Repository**: [${{ github.repository }}](https://github.com/${{ github.repository }})
+          - **Commit**: [${{ github.sha }}](https://github.com/${{ github.repository }}/commit/${{ github.sha }})
+          - **Workflow File**: [build-windows-libvips.yml](https://github.com/${{ github.repository }}/blob/${{ github.sha }}/.github/workflows/build-windows-libvips.yml)
+          - **Workflow Run**: [Run #${{ github.run_number }}](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})
+          
+          ### Package Source
+          - **Source**: [libvips/build-win64-mxe](https://github.com/libvips/build-win64-mxe)
+          - **Pre-built binaries**: [Releases](https://github.com/libvips/build-win64-mxe/releases)
+          - **Version**: ${VIPS_VERSION}
+          
+          ## GitHub Actions Used
+          
+          | Action | Version |
+          |--------|---------|
+          | actions/checkout | v4 |
+          | actions/setup-python | v5 |
+          | actions/upload-artifact | v4 |
+          | softprops/action-gh-release | v2 |
+          
+          ## Build Environment
+          
+          ### System
+          - **Runner**: \`${{ matrix.runner }}\`
+          - **Architecture**: ${{ matrix.arch }}
+          - **OS**: Windows
+          
+          ## How to Use
+          
+          1. Download \`libvips-windows-*.zip\` from this release
+          2. Extract to your project directory
+          3. The \`bin/\` directory contains DLL files
+          4. The \`lib/\` directory contains import libraries
+          5. The \`include/\` directory contains header files
+          
+          ### Using with your project (Visual Studio)
+          
+          1. Add the \`include\` directory to your project's include paths
+          2. Add the \`lib\` directory to your library paths
+          3. Link against \`vips.lib\`
+          4. Copy DLLs from \`bin\` to your application's output directory
+          
+          ### Using with your project (CMake)
+          
+          \`\`\`cmake
+          # Add include directory
+          target_include_directories(your_app PRIVATE /path/to/libvips/include)
+          
+          # Add library directory
+          target_link_directories(your_app PRIVATE /path/to/libvips/lib)
+          
+          # Link against libvips
+          target_link_libraries(your_app vips)
+          \`\`\`
+          
+          ### Runtime Requirements
+          
+          Make sure the DLL files are in one of these locations:
+          - Same directory as your executable
+          - A directory in your system's PATH
+          
+          RELEASE_EOF
+          
+          echo "Release notes generated"
+          cat /tmp/release-notes.md
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.build-info.outputs.build_tag }}
+          name: Windows libvips (${{ matrix.arch }}) - ${{ steps.build-info.outputs.build_tag }}
+          body_path: /tmp/release-notes.md
+          draft: false
+          prerelease: false
+          files: ${{ steps.package.outputs.archive_path }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
