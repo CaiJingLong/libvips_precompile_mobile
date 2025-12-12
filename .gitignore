@@ -2,3 +2,5 @@ logs/
 output/
 conan/
 meson/
+__pycache__/
+*.pyc

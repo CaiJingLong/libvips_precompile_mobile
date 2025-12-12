@@ -10,6 +10,8 @@ Usage:
     python3 copy_libvips_macos.py --output /path/to/output
 """
 
+from __future__ import annotations
+
 import argparse
 import logging
 import os

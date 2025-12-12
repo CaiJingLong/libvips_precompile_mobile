@@ -9,6 +9,8 @@ Usage:
     python3 copy_libvips_windows.py --output C:\\path\\to\\output --arch x64
 """
 
+from __future__ import annotations
+
 import argparse
 import logging
 import os
