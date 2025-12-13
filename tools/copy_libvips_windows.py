@@ -152,7 +152,7 @@ def extract_zip(zip_path: Path, extract_dir: Path) -> Path:
 
 
 def copy_libraries(source_dir: Path, output_dir: Path) -> list[str]:
-    """Copy DLL files and headers to the output directory."""
+    """Copy DLL files, headers, and all required content to the output directory."""
     copied_files = []
     
     # Copy bin directory (contains DLLs)
@@ -201,6 +201,39 @@ def copy_libraries(source_dir: Path, output_dir: Path) -> list[str]:
         logger.info(f"  Copied {header_count} header files")
     else:
         logger.debug(f"Include directory not found: {include_src}")
+    
+    # Copy etc directory (font configuration)
+    etc_src = source_dir / "etc"
+    etc_dst = output_dir / "etc"
+    
+    if etc_src.exists():
+        logger.info(f"Copying etc directory from {etc_src}")
+        shutil.copytree(etc_src, etc_dst, dirs_exist_ok=True)
+        etc_count = sum(1 for _ in etc_dst.rglob("*") if _.is_file())
+        logger.info(f"  Copied {etc_count} config files")
+    else:
+        logger.debug(f"Etc directory not found: {etc_src}")
+    
+    # Copy share directory (fontconfig, gettext, etc.)
+    share_src = source_dir / "share"
+    share_dst = output_dir / "share"
+    
+    if share_src.exists():
+        logger.info(f"Copying share directory from {share_src}")
+        shutil.copytree(share_src, share_dst, dirs_exist_ok=True)
+        share_count = sum(1 for _ in share_dst.rglob("*") if _.is_file())
+        logger.info(f"  Copied {share_count} share files")
+    else:
+        logger.debug(f"Share directory not found: {share_src}")
+    
+    # Copy root level files (LICENSE, README, etc.)
+    root_files = ["LICENSE", "README.md", "ChangeLog", "versions.json"]
+    for filename in root_files:
+        src_file = source_dir / filename
+        if src_file.exists():
+            shutil.copy2(src_file, output_dir / filename)
+            copied_files.append(filename)
+            logger.info(f"Copied root file: {filename}")
     
     return copied_files
 

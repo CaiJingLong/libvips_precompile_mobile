@@ -98,12 +98,24 @@ jobs:
           echo "Output Directory Contents"
           echo "============================================"
           
+          echo "Top-level contents:"
+          ls -la "$OUTPUT_DIR"
+          
+          echo ""
           echo "Directory structure:"
-          find "$OUTPUT_DIR" -type f | head -50
+          find "$OUTPUT_DIR" -type f | head -100
           
           echo ""
           echo "DLL files:"
           ls -la "$OUTPUT_DIR/bin/"*.dll 2>/dev/null | head -20 || echo "No DLL files found"
+          
+          echo ""
+          echo "Package contents summary:"
+          echo "  - bin/: $(find "$OUTPUT_DIR/bin" -type f 2>/dev/null | wc -l) files"
+          echo "  - lib/: $(find "$OUTPUT_DIR/lib" -type f 2>/dev/null | wc -l) files"
+          echo "  - include/: $(find "$OUTPUT_DIR/include" -type f 2>/dev/null | wc -l) files"
+          echo "  - etc/: $(find "$OUTPUT_DIR/etc" -type f 2>/dev/null | wc -l) files"
+          echo "  - share/: $(find "$OUTPUT_DIR/share" -type f 2>/dev/null | wc -l) files"
 
       - name: Package build artifacts
         id: package
@@ -186,6 +198,18 @@ jobs:
           - **Runner**: \`${{ matrix.runner }}\`
           - **Architecture**: ${{ matrix.arch }}
           - **OS**: Windows
+          
+          ## Package Contents
+          
+          This release includes:
+          - \`bin/\` - DLL files and executables
+          - \`lib/\` - Import libraries (.lib files for linking)
+          - \`include/\` - Header files
+          - \`etc/\` - Configuration files (fonts)
+          - \`share/\` - Shared data files (fontconfig, gettext)
+          - \`LICENSE\` - License file
+          - \`README.md\` - Documentation
+          - \`versions.json\` - Version information
           
           ## How to Use
           
