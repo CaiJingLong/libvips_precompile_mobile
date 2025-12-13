@@ -59,6 +59,7 @@ jobs:
           python3 tools/copy_libvips_windows.py \
             --output "$OUTPUT_DIR" \
             --arch ${{ matrix.arch }} \
+            --include-headers \
             --verbose
           
           # Read version from VERSION.txt
@@ -107,15 +108,12 @@ jobs:
           
           echo ""
           echo "DLL files:"
-          ls -la "$OUTPUT_DIR/bin/"*.dll 2>/dev/null | head -20 || echo "No DLL files found"
+          ls -la "$OUTPUT_DIR/lib/"*.dll 2>/dev/null | head -20 || echo "No DLL files found"
           
           echo ""
           echo "Package contents summary:"
-          echo "  - bin/: $(find "$OUTPUT_DIR/bin" -type f 2>/dev/null | wc -l) files"
-          echo "  - lib/: $(find "$OUTPUT_DIR/lib" -type f 2>/dev/null | wc -l) files"
-          echo "  - include/: $(find "$OUTPUT_DIR/include" -type f 2>/dev/null | wc -l) files"
-          echo "  - etc/: $(find "$OUTPUT_DIR/etc" -type f 2>/dev/null | wc -l) files"
-          echo "  - share/: $(find "$OUTPUT_DIR/share" -type f 2>/dev/null | wc -l) files"
+          echo "  - lib/: $(find "$OUTPUT_DIR/lib" -type f -name "*.dll" 2>/dev/null | wc -l) DLL files"
+          echo "  - include/: $(find "$OUTPUT_DIR/include" -type f 2>/dev/null | wc -l) header files"
 
       - name: Package build artifacts
         id: package
@@ -201,49 +199,33 @@ jobs:
           
           ## Package Contents
           
-          This release includes:
-          - \`bin/\` - DLL files and executables
-          - \`lib/\` - Import libraries (.lib files for linking)
-          - \`include/\` - Header files
-          - \`etc/\` - Configuration files (fonts)
-          - \`share/\` - Shared data files (fontconfig, gettext)
-          - \`LICENSE\` - License file
-          - \`README.md\` - Documentation
-          - \`versions.json\` - Version information
+          This is a minimal FFI-ready release, consistent with other platforms (macOS, Linux, Android, iOS):
+          - \`lib/\` - DLL files (dynamic libraries for runtime loading)
+          - \`include/\` - Header files (for FFI code generation)
+          - \`lib/pkgconfig/\` - pkg-config files
+          - \`VERSION.txt\` - Version information
           
           ## How to Use
           
+          ### For FFI Bindings (Dart/Flutter)
+          
           1. Download \`libvips-windows-*.zip\` from this release
           2. Extract to your project directory
-          3. The \`bin/\` directory contains DLL files
-          4. The \`lib/\` directory contains import libraries
-          5. The \`include/\` directory contains header files
+          3. The \`lib/\` directory contains DLL files for runtime loading
+          4. The \`include/\` directory contains header files for FFI generation
           
-          ### Using with your project (Visual Studio)
-          
-          1. Add the \`include\` directory to your project's include paths
-          2. Add the \`lib\` directory to your library paths
-          3. Link against \`vips.lib\`
-          4. Copy DLLs from \`bin\` to your application's output directory
-          
-          ### Using with your project (CMake)
-          
-          \`\`\`cmake
-          # Add include directory
-          target_include_directories(your_app PRIVATE /path/to/libvips/include)
-          
-          # Add library directory
-          target_link_directories(your_app PRIVATE /path/to/libvips/lib)
-          
-          # Link against libvips
-          target_link_libraries(your_app vips)
-          \`\`\`
-          
-          ### Runtime Requirements
+          ### Loading DLLs at Runtime
           
           Make sure the DLL files are in one of these locations:
           - Same directory as your executable
           - A directory in your system's PATH
+          - Specified via \`SetDllDirectory\` API
+          
+          ### Example (Dart FFI)
+          
+          \`\`\`dart
+          final lib = DynamicLibrary.open('path/to/lib/libvips-42.dll');
+          \`\`\`
           
           RELEASE_EOF
           

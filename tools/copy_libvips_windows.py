@@ -151,89 +151,63 @@ def extract_zip(zip_path: Path, extract_dir: Path) -> Path:
     return extract_dir
 
 
-def copy_libraries(source_dir: Path, output_dir: Path) -> list[str]:
-    """Copy DLL files, headers, and all required content to the output directory."""
+def copy_libraries(source_dir: Path, output_dir: Path, include_headers: bool = True) -> list[str]:
+    """Copy DLL files and optionally headers to the output directory.
+    
+    This function extracts only the minimal files needed for FFI bindings:
+    - DLL files (dynamic libraries for runtime loading)
+    - Headers (optional, for FFI code generation)
+    
+    This is consistent with other platforms:
+    - macOS: .dylib files + headers
+    - Linux: .so files + headers
+    - iOS: .xcframework (static)
+    - Android: .so files in jniLibs + headers
+    """
     copied_files = []
     
-    # Copy bin directory (contains DLLs)
+    # Copy DLL files to lib directory (consistent with macOS/Linux which use lib/)
     bin_src = source_dir / "bin"
-    bin_dst = output_dir / "bin"
+    lib_dst = output_dir / "lib"
     
     if bin_src.exists():
-        logger.info(f"Copying binaries from {bin_src}")
-        bin_dst.mkdir(parents=True, exist_ok=True)
+        logger.info(f"Copying DLL files from {bin_src}")
+        lib_dst.mkdir(parents=True, exist_ok=True)
         
         for dll in bin_src.glob("*.dll"):
-            shutil.copy2(dll, bin_dst)
+            shutil.copy2(dll, lib_dst)
             copied_files.append(dll.name)
             logger.info(f"  Copied: {dll.name}")
-        
-        # Also copy executables
-        for exe in bin_src.glob("*.exe"):
-            shutil.copy2(exe, bin_dst)
-            copied_files.append(exe.name)
-            logger.info(f"  Copied: {exe.name}")
     else:
         logger.warning(f"Bin directory not found: {bin_src}")
     
-    # Copy lib directory (contains import libraries)
-    lib_src = source_dir / "lib"
-    lib_dst = output_dir / "lib"
-    
-    if lib_src.exists():
-        logger.info(f"Copying import libraries from {lib_src}")
-        shutil.copytree(lib_src, lib_dst, dirs_exist_ok=True)
+    # Copy include directory (headers) - needed for FFI code generation
+    if include_headers:
+        include_src = source_dir / "include"
+        include_dst = output_dir / "include"
         
-        lib_count = sum(1 for _ in lib_dst.rglob("*.lib")) + sum(1 for _ in lib_dst.rglob("*.a"))
-        logger.info(f"  Copied {lib_count} library files")
-    else:
-        logger.debug(f"Lib directory not found: {lib_src}")
+        if include_src.exists():
+            logger.info(f"Copying headers from {include_src}")
+            shutil.copytree(include_src, include_dst, dirs_exist_ok=True)
+            
+            header_count = sum(1 for _ in include_dst.rglob("*.h"))
+            logger.info(f"  Copied {header_count} header files")
+        else:
+            logger.debug(f"Include directory not found: {include_src}")
     
-    # Copy include directory (headers)
-    include_src = source_dir / "include"
-    include_dst = output_dir / "include"
+    # Copy pkg-config files (useful for build systems)
+    pkgconfig_src = source_dir / "lib" / "pkgconfig"
+    pkgconfig_dst = output_dir / "lib" / "pkgconfig"
     
-    if include_src.exists():
-        logger.info(f"Copying headers from {include_src}")
-        shutil.copytree(include_src, include_dst, dirs_exist_ok=True)
+    if pkgconfig_src.exists():
+        logger.info(f"Copying pkg-config files from {pkgconfig_src}")
+        pkgconfig_dst.mkdir(parents=True, exist_ok=True)
         
-        header_count = sum(1 for _ in include_dst.rglob("*.h"))
-        logger.info(f"  Copied {header_count} header files")
+        for pc_file in pkgconfig_src.glob("*.pc"):
+            shutil.copy2(pc_file, pkgconfig_dst)
+            logger.info(f"  Copied: {pc_file.name}")
     else:
-        logger.debug(f"Include directory not found: {include_src}")
-    
-    # Copy etc directory (font configuration)
-    etc_src = source_dir / "etc"
-    etc_dst = output_dir / "etc"
-    
-    if etc_src.exists():
-        logger.info(f"Copying etc directory from {etc_src}")
-        shutil.copytree(etc_src, etc_dst, dirs_exist_ok=True)
-        etc_count = sum(1 for _ in etc_dst.rglob("*") if _.is_file())
-        logger.info(f"  Copied {etc_count} config files")
-    else:
-        logger.debug(f"Etc directory not found: {etc_src}")
-    
-    # Copy share directory (fontconfig, gettext, etc.)
-    share_src = source_dir / "share"
-    share_dst = output_dir / "share"
-    
-    if share_src.exists():
-        logger.info(f"Copying share directory from {share_src}")
-        shutil.copytree(share_src, share_dst, dirs_exist_ok=True)
-        share_count = sum(1 for _ in share_dst.rglob("*") if _.is_file())
-        logger.info(f"  Copied {share_count} share files")
-    else:
-        logger.debug(f"Share directory not found: {share_src}")
-    
-    # Copy root level files (LICENSE, README, etc.)
-    root_files = ["LICENSE", "README.md", "ChangeLog", "versions.json"]
-    for filename in root_files:
-        src_file = source_dir / filename
-        if src_file.exists():
-            shutil.copy2(src_file, output_dir / filename)
-            copied_files.append(filename)
-            logger.info(f"Copied root file: {filename}")
+        logger.debug(f"No pkg-config directory found: {pkgconfig_src}")
     
     return copied_files
 
@@ -270,6 +244,11 @@ def main():
         type=str,
         default="latest",
         help="libvips version to download (default: latest)"
+    )
+    parser.add_argument(
+        "--include-headers",
+        action="store_true",
+        help="Also copy header files"
     )
     parser.add_argument(
         "--verbose", "-v",
@@ -330,7 +309,7 @@ def main():
         logger.info("")
         logger.info("Copying libraries...")
         logger.info("-" * 40)
-        copied_files = copy_libraries(extracted_dir, args.output)
+        copied_files = copy_libraries(extracted_dir, args.output, args.include_headers)
     
     # Create version info file
     version_file = args.output / "VERSION.txt"
@@ -342,7 +321,7 @@ def main():
         f.write(f"Download URL: {download_url}\n")
         f.write(f"Filename: {filename}\n")
         f.write(f"\nDLLs copied: {len([f for f in copied_files if f.endswith('.dll')])}\n")
-        f.write(f"\nFiles:\n")
+        f.write(f"\nLibraries:\n")
         for file in sorted(copied_files):
             f.write(f"  - {file}\n")
     
