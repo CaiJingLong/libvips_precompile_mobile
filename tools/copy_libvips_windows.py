@@ -92,7 +92,7 @@ def find_asset_for_arch(release_info: dict, arch: str, build_type: str = "web") 
     for asset in release_info.get("assets", []):
         name = asset["name"]
         # Pattern: vips-dev-w64-web-X.Y.Z-static.zip or vips-dev-w64-all-X.Y.Z.zip
-        # We want the build with static dependencies for web, and regular for all
+        # Prefer non-ffi versions for simplicity
         if arch_suffix in name and build_type in name and name.endswith(".zip"):
             # Prefer non-ffi versions
             if "ffi" not in name:
@@ -295,7 +295,7 @@ def main():
     # Find the appropriate asset
     asset = find_asset_for_arch(release_info, args.arch, args.build_type)
     if not asset:
-        logger.error(f"Could not find a download for architecture: {args.arch}")
+        logger.error(f"Could not find a download for architecture: {args.arch}, build type: {args.build_type}")
         logger.error(f"Available assets:")
         for a in release_info.get("assets", []):
             logger.error(f"  - {a['name']}")
