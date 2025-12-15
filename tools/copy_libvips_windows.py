@@ -89,12 +89,11 @@ def find_asset_for_arch(release_info: dict, arch: str, build_type: str = "web") 
     logger.info(f"Looking for architecture: {arch} (suffix: {arch_suffix}), build type: {build_type}")
     
     # Look for the asset with specific build type
+    # Pattern: vips-dev-w64-{web|all}-X.Y.Z-static.zip or vips-dev-arm64-{web|all}-X.Y.Z-static.zip
     for asset in release_info.get("assets", []):
         name = asset["name"]
-        # Pattern: vips-dev-w64-web-X.Y.Z-static.zip or vips-dev-w64-all-X.Y.Z.zip
-        # Prefer non-ffi versions for simplicity
         if arch_suffix in name and build_type in name and name.endswith(".zip"):
-            # Prefer non-ffi versions
+            # Prefer non-ffi versions for simplicity
             if "ffi" not in name:
                 logger.info(f"Found asset: {name}")
                 return asset["browser_download_url"], name
