@@ -73,25 +73,36 @@ def get_latest_release_info() -> dict:
         raise
 
 
-def find_asset_for_arch(release_info: dict, arch: str) -> tuple[str, str] | None:
-    """Find the download URL for the specified architecture."""
+def find_asset_for_arch(release_info: dict, arch: str, build_type: str = "web") -> tuple[str, str] | None:
+    """Find the download URL for the specified architecture and build type.
+    
+    Args:
+        release_info: GitHub release information
+        arch: Architecture (x64 or arm64)
+        build_type: Build type ("web" or "all")
+    
+    Returns:
+        Tuple of (download_url, filename) or None if not found
+    """
     arch_suffix = ARCH_MAP.get(arch, arch)
     
-    logger.info(f"Looking for architecture: {arch} (suffix: {arch_suffix})")
+    logger.info(f"Looking for architecture: {arch} (suffix: {arch_suffix}), build type: {build_type}")
     
-    # Look for the asset
+    # Look for the asset with specific build type
     for asset in release_info.get("assets", []):
         name = asset["name"]
-        # Pattern: vips-dev-w64-web-X.Y.Z-static.zip or vips-dev-arm64-web-X.Y.Z-static.zip
-        # We want the web build with static dependencies
-        if arch_suffix in name and "web" in name and name.endswith(".zip"):
-            logger.info(f"Found asset: {name}")
-            return asset["browser_download_url"], name
+        # Pattern: vips-dev-w64-web-X.Y.Z-static.zip or vips-dev-w64-all-X.Y.Z.zip
+        # We want the build with static dependencies for web, and regular for all
+        if arch_suffix in name and build_type in name and name.endswith(".zip"):
+            # Prefer non-ffi versions
+            if "ffi" not in name:
+                logger.info(f"Found asset: {name}")
+                return asset["browser_download_url"], name
     
-    # Fallback: look for any matching zip
+    # Fallback: look for any matching zip with build type
     for asset in release_info.get("assets", []):
         name = asset["name"]
-        if arch_suffix in name and name.endswith(".zip"):
+        if arch_suffix in name and build_type in name and name.endswith(".zip"):
             logger.info(f"Found fallback asset: {name}")
             return asset["browser_download_url"], name
     
@@ -240,6 +251,13 @@ def main():
         help="Target architecture (default: x64)"
     )
     parser.add_argument(
+        "--build-type", "-b",
+        type=str,
+        choices=["web", "all"],
+        default="web",
+        help="Build type: web (common formats) or all (all formats) (default: web)"
+    )
+    parser.add_argument(
         "--version", "-V",
         type=str,
         default="latest",
@@ -265,6 +283,7 @@ def main():
     logger.info("libvips Windows Binary Downloader")
     logger.info("=" * 60)
     logger.info(f"Target architecture: {args.arch}")
+    logger.info(f"Build type: {args.build_type}")
     logger.info(f"Target version: {args.version}")
     logger.info(f"Output directory: {args.output}")
     
@@ -274,7 +293,7 @@ def main():
     logger.info(f"Latest release: {release_tag}")
     
     # Find the appropriate asset
-    asset = find_asset_for_arch(release_info, args.arch)
+    asset = find_asset_for_arch(release_info, args.arch, args.build_type)
     if not asset:
         logger.error(f"Could not find a download for architecture: {args.arch}")
         logger.error(f"Available assets:")
@@ -317,6 +336,7 @@ def main():
         f.write(f"libvips version: {version}\n")
         f.write(f"Release tag: {release_tag}\n")
         f.write(f"Architecture: {args.arch}\n")
+        f.write(f"Build type: {args.build_type}\n")
         f.write(f"Source: {LIBVIPS_RELEASES_PAGE}\n")
         f.write(f"Download URL: {download_url}\n")
         f.write(f"Filename: {filename}\n")
@@ -332,6 +352,7 @@ def main():
     logger.info(f"libvips version: {version}")
     logger.info(f"Release tag: {release_tag}")
     logger.info(f"Architecture: {args.arch}")
+    logger.info(f"Build type: {args.build_type}")
     logger.info(f"DLLs copied: {len([f for f in copied_files if f.endswith('.dll')])}")
     logger.info(f"Output directory: {args.output}")
     
