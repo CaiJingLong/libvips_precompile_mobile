@@ -12,10 +12,17 @@ jobs:
     strategy:
       matrix:
         include:
+          # x64 builds - both web and all available
           - runner: windows-2022  # x64
             arch: x64
+            build_type: web
+          - runner: windows-2022  # x64
+            arch: x64
+            build_type: all
+          # arm64 builds - only web available currently
           - runner: windows-11-arm  # arm64
             arch: arm64
+            build_type: web
     runs-on: ${{ matrix.runner }}
     permissions:
       contents: write
@@ -31,7 +38,7 @@ jobs:
         shell: bash
         run: |
           BUILD_DATE=$(date -u +"%Y-%m-%d")
-          BUILD_TAG="windows-${{ matrix.arch }}-${BUILD_DATE}-${{ github.run_number }}"
+          BUILD_TAG="windows-${{ matrix.arch }}-${{ matrix.build_type }}-${BUILD_DATE}-${{ github.run_number }}"
           BUILD_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
           echo "build_date=${BUILD_DATE}" >> $GITHUB_OUTPUT
           echo "build_tag=${BUILD_TAG}" >> $GITHUB_OUTPUT
@@ -49,16 +56,17 @@ jobs:
         id: extract
         shell: bash
         run: |
-          OUTPUT_DIR="${{ github.workspace }}/output/windows-${{ matrix.arch }}"
+          OUTPUT_DIR="${{ github.workspace }}/output/windows-${{ matrix.arch }}-${{ matrix.build_type }}"
           mkdir -p "$OUTPUT_DIR"
           
           echo "============================================"
-          echo "Downloading libvips for Windows ${{ matrix.arch }}"
+          echo "Downloading libvips for Windows ${{ matrix.arch }} (${{ matrix.build_type }})"
           echo "============================================"
           
           python3 tools/copy_libvips_windows.py \
             --output "$OUTPUT_DIR" \
             --arch ${{ matrix.arch }} \
+            --build-type ${{ matrix.build_type }} \
             --include-headers \
             --verbose
           
@@ -81,6 +89,7 @@ jobs:
           echo "## System Information" | tee -a "$ENV_FILE"
           echo "OS: Windows" | tee -a "$ENV_FILE"
           echo "Architecture: ${{ matrix.arch }}" | tee -a "$ENV_FILE"
+          echo "Build Type: ${{ matrix.build_type }}" | tee -a "$ENV_FILE"
           echo "Runner: ${{ matrix.runner }}" | tee -a "$ENV_FILE"
           echo "" | tee -a "$ENV_FILE"
           
@@ -141,7 +150,7 @@ jobs:
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
         with:
-          name: libvips-windows-${{ matrix.arch }}-${{ steps.build-info.outputs.build_tag }}
+          name: libvips-windows-${{ matrix.arch }}-${{ matrix.build_type }}-${{ steps.build-info.outputs.build_tag }}
           path: ${{ steps.package.outputs.archive_path }}
           retention-days: 30
 
@@ -154,7 +163,7 @@ jobs:
           VIPS_VERSION="${{ steps.extract.outputs.vips_version }}"
           
           cat << RELEASE_EOF > /tmp/release-notes.md
-          # Windows libvips (${{ matrix.arch }}) - ${BUILD_TAG}
+          # Windows libvips (${{ matrix.arch }} - ${{ matrix.build_type }}) - ${BUILD_TAG}
           
           ## Build Information
           
@@ -165,8 +174,14 @@ jobs:
           | **Build Tag** | ${BUILD_TAG} |
           | **libvips Version** | ${VIPS_VERSION} |
           | **Architecture** | ${{ matrix.arch }} |
+          | **Build Type** | ${{ matrix.build_type }} |
           | **GitHub Run ID** | ${{ github.run_id }} |
           | **GitHub Run Number** | ${{ github.run_number }} |
+          
+          ## Build Type
+          
+          - **web**: Includes common web image formats (JPEG, PNG, WebP, GIF)
+          - **all**: Includes all supported formats (TIFF, PDF, SVG, HEIC, and more)
           
           ## Source References
           
@@ -195,6 +210,7 @@ jobs:
           ### System
           - **Runner**: \`${{ matrix.runner }}\`
           - **Architecture**: ${{ matrix.arch }}
+          - **Build Type**: ${{ matrix.build_type }}
           - **OS**: Windows
           
           ## Package Contents
@@ -236,7 +252,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.build-info.outputs.build_tag }}
-          name: Windows libvips (${{ matrix.arch }}) - ${{ steps.build-info.outputs.build_tag }}
+          name: Windows libvips (${{ matrix.arch }} - ${{ matrix.build_type }}) - ${{ steps.build-info.outputs.build_tag }}
           body_path: /tmp/release-notes.md
           draft: false
           prerelease: false
