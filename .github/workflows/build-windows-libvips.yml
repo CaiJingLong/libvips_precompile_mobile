@@ -130,6 +130,7 @@ jobs:
         run: |
           BUILD_TAG="${{ steps.build-info.outputs.build_tag }}"
           OUTPUT_DIR="${{ steps.extract.outputs.output_dir }}"
+          TEMP_DIR="${{ runner.temp }}"
           
           echo "============================================"
           echo "Creating Package Archive"
@@ -137,15 +138,16 @@ jobs:
           
           cd "$OUTPUT_DIR"
           ARCHIVE_NAME="libvips-${BUILD_TAG}.zip"
+          ARCHIVE_PATH="${TEMP_DIR}/${ARCHIVE_NAME}"
           
-          # Use zip for Windows compatibility
-          7z a -tzip "/tmp/${ARCHIVE_NAME}" .
+          # Use 7z for Windows compatibility
+          7z a -tzip "$ARCHIVE_PATH" .
           
-          echo "archive_path=/tmp/${ARCHIVE_NAME}" >> $GITHUB_OUTPUT
+          echo "archive_path=${ARCHIVE_PATH}" >> $GITHUB_OUTPUT
           echo "archive_name=${ARCHIVE_NAME}" >> $GITHUB_OUTPUT
           
           echo "Created archive: ${ARCHIVE_NAME}"
-          ls -lh "/tmp/${ARCHIVE_NAME}"
+          ls -lh "$ARCHIVE_PATH"
 
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
@@ -161,8 +163,9 @@ jobs:
           BUILD_TAG="${{ steps.build-info.outputs.build_tag }}"
           BUILD_TIME="${{ steps.build-info.outputs.build_time }}"
           VIPS_VERSION="${{ steps.extract.outputs.vips_version }}"
+          RELEASE_NOTES_PATH="${{ runner.temp }}/release-notes.md"
           
-          cat << RELEASE_EOF > /tmp/release-notes.md
+          cat << RELEASE_EOF > "$RELEASE_NOTES_PATH"
           # Windows libvips (${{ matrix.arch }} - ${{ matrix.build_type }}) - ${BUILD_TAG}
           
           ## Build Information
@@ -245,15 +248,16 @@ jobs:
           
           RELEASE_EOF
           
+          echo "release_notes_path=${RELEASE_NOTES_PATH}" >> $GITHUB_OUTPUT
           echo "Release notes generated"
-          cat /tmp/release-notes.md
+          cat "$RELEASE_NOTES_PATH"
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.build-info.outputs.build_tag }}
           name: Windows libvips (${{ matrix.arch }} - ${{ matrix.build_type }}) - ${{ steps.build-info.outputs.build_tag }}
-          body_path: /tmp/release-notes.md
+          body_path: ${{ steps.release-notes.outputs.release_notes_path }}
           draft: false
           prerelease: false
           files: ${{ steps.package.outputs.archive_path }}
