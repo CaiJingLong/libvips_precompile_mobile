@@ -12,18 +12,17 @@ jobs:
     strategy:
       matrix:
         include:
+          # x64 builds - both web and all available
           - runner: windows-2022  # x64
             arch: x64
             build_type: web
           - runner: windows-2022  # x64
             arch: x64
             build_type: all
+          # arm64 builds - only web available currently
           - runner: windows-11-arm  # arm64
             arch: arm64
             build_type: web
-          - runner: windows-11-arm  # arm64
-            arch: arm64
-            build_type: all
     runs-on: ${{ matrix.runner }}
     permissions:
       contents: write
