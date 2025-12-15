@@ -6,7 +6,7 @@ This script downloads the official pre-built libvips binaries from GitHub
 and extracts them to an output directory.
 
 Usage:
-    python3 copy_libvips_windows.py --output C:\\path\\to\\output --arch x64
+    python3 copy_libvips_windows.py --output C:\\path\\to\\output --arch x64 --build-type web
 """
 
 from __future__ import annotations
